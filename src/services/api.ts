@@ -172,9 +172,15 @@ export async function signup(data: SignupRequest): Promise<SignupResponse> {
     return response.data
   } catch (error: any) {
     if (axios.isAxiosError(error)) {
-      throw new Error(
-        error.response?.data?.message || error.message || 'Signup failed'
-      )
+      // Try to extract a more detailed error message
+      const errorMessage = 
+        error.response?.data?.error ||
+        error.response?.data?.message || 
+        (error.response?.data && typeof error.response.data === 'string' ? error.response.data : null) ||
+        error.message || 
+        'Signup failed'
+      
+      throw new Error(errorMessage)
     }
     throw error
   }

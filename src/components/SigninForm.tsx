@@ -3,6 +3,7 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { signin, sendOTP } from '@/services/api'
+import { Mail, Lock, Loader2 } from 'lucide-react'
 
 interface SigninFormProps {
   onSigninSuccess: (email: string) => void
@@ -73,50 +74,81 @@ export function SigninForm({ onSigninSuccess, onError }: SigninFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="signin-email">Work Email <span className="text-red-500">*</span></Label>
-        <Input
-          id="signin-email"
-          type="email"
-          value={workEmail}
-          onChange={(e) => {
-            setWorkEmail(e.target.value)
-            if (errors.workEmail) {
-              setErrors((prev) => ({ ...prev, workEmail: undefined }))
-            }
-          }}
-          placeholder="Work Email"
-          className={errors.workEmail ? 'border-destructive' : ''}
-        />
-        {errors.workEmail && (
-          <p className="text-sm text-destructive">{errors.workEmail}</p>
-        )}
+    <div className="space-y-6">
+      {/* Header Section */}
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <div>
+            <h3 className="text-2xl font-bold text-gray-900">Sign In to Your Account</h3>
+            <p className="text-sm text-gray-600 mt-1">Enter your credentials to access your account</p>
+          </div>
+        </div>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="signin-password">Password <span className="text-red-500">*</span></Label>
-        <Input
-          id="signin-password"
-          type="password"
-          value={password}
-          onChange={(e) => {
-            setPassword(e.target.value)
-            if (errors.password) {
-              setErrors((prev) => ({ ...prev, password: undefined }))
-            }
-          }}
-          placeholder="Password"
-          className={errors.password ? 'border-destructive' : ''}
-        />
-        {errors.password && (
-          <p className="text-sm text-destructive">{errors.password}</p>
-        )}
-      </div>
+      {/* Form */}
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="space-y-6 animate-in fade-in slide-in-from-right duration-300">
+          <div className="space-y-2">
+            <Label htmlFor="signin-email" className="flex items-center gap-2">
+              <Mail className="w-4 h-4" />
+              Work Email <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="signin-email"
+              type="email"
+              value={workEmail}
+              onChange={(e) => {
+                setWorkEmail(e.target.value)
+                if (errors.workEmail) {
+                  setErrors((prev) => ({ ...prev, workEmail: undefined }))
+                }
+              }}
+              placeholder="Work Email"
+              className={errors.workEmail ? 'border-destructive' : ''}
+            />
+            {errors.workEmail && (
+              <p className="text-sm text-destructive">{errors.workEmail}</p>
+            )}
+          </div>
 
-      <Button type="submit" className="w-full" disabled={loading}>
-        {loading ? 'Signing in...' : 'Sign In'}
-      </Button>
-    </form>
+          <div className="space-y-2">
+            <Label htmlFor="signin-password" className="flex items-center gap-2">
+              <Lock className="w-4 h-4" />
+              Password <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="signin-password"
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value)
+                if (errors.password) {
+                  setErrors((prev) => ({ ...prev, password: undefined }))
+                }
+              }}
+              placeholder="Password"
+              className={errors.password ? 'border-destructive' : ''}
+            />
+            {errors.password && (
+              <p className="text-sm text-destructive">{errors.password}</p>
+            )}
+          </div>
+        </div>
+
+        {/* Submit Button */}
+        <div className="flex items-center justify-end pt-6 border-t border-gray-200">
+          <Button type="submit" disabled={loading} className="min-w-[100px]">
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Signing in...
+              </>
+            ) : (
+              'Sign In'
+            )}
+          </Button>
+        </div>
+      </form>
+    </div>
   )
 }

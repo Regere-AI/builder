@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
@@ -29,7 +29,6 @@ export function VerificationCode({
 }: VerificationCodeProps) {
   const [code, setCode] = useState('')
   const [loading, setLoading] = useState(false)
-  const [testOtp, setTestOtp] = useState<string | null>(null)
 
   // Generate input ID based on purpose if not provided
   const finalInputId = inputId || (purpose === 'emailVerification' ? 'otp' : '2fa-code')
@@ -41,22 +40,6 @@ export function VerificationCode({
   const failureError = purpose === 'emailVerification'
     ? 'OTP verification failed. Please try again.'
     : '2FA verification failed. Please try again.'
-  const devModeText = purpose === 'emailVerification'
-    ? 'Using test OTP'
-    : 'Using test code'
-
-  useEffect(() => {
-    const fetchTestOtp = async () => {
-      if (window.electronAPI?.getEnv) {
-        const otp = await window.electronAPI.getEnv('2FA_OTP_TEST')
-        if (otp) {
-          setTestOtp(otp)
-          setCode(otp)
-        }
-      }
-    }
-    fetchTestOtp()
-  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -68,16 +51,21 @@ export function VerificationCode({
 
     setLoading(true)
     try {
-      const requestData = {
-        email: email,
-        code: code,
-        purpose: purpose === 'emailVerification' ? 'emailVerification' as const : 'login' as const,
-      }
-      
       // Call appropriate API function based on purpose
-      const response = purpose === 'emailVerification' 
-        ? await verifyOTP(requestData)
-        : await verify2FA(requestData)
+      let response
+      if (purpose === 'emailVerification') {
+        response = await verifyOTP({
+          email: email,
+          code: code,
+          purpose: 'emailVerification' as const,
+        })
+      } else {
+        response = await verify2FA({
+          email: email,
+          code: code,
+          purpose: 'login' as const,
+        })
+      }
 
       if (response.success) {
         onVerificationSuccess(response.data.token, response.data.user)
@@ -112,14 +100,6 @@ export function VerificationCode({
                 {icon}
               </div>
             </div>
-
-            {testOtp && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
-                <p className="text-sm text-blue-800">
-                  <strong>Development mode:</strong> {devModeText}: <code className="font-mono font-bold">{testOtp}</code>
-                </p>
-              </div>
-            )}
 
             <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom duration-300">
               <div className="space-y-3">

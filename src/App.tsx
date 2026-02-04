@@ -57,8 +57,9 @@ function App() {
 
   const handleOTPSuccess = (token: string, userData: User) => {
     console.log('handleOTPSuccess called with:', { token, userData })
-    // Store token for future use
+    // Store token and user data for session persistence
     localStorage.setItem('authToken', token)
+    localStorage.setItem('userData', JSON.stringify(userData))
     // Set user and view state to trigger redirect to welcome screen
     setUser(userData)
     setCurrentView('welcome')
@@ -68,8 +69,9 @@ function App() {
 
   const handle2FASuccess = (token: string, userData: User) => {
     console.log('handle2FASuccess called with:', { token, userData })
-    // Store token for future use
+    // Store token and user data for session persistence
     localStorage.setItem('authToken', token)
+    localStorage.setItem('userData', JSON.stringify(userData))
     // Set user and view state to trigger redirect to welcome screen
     setUser(userData)
     setCurrentView('welcome')
@@ -87,6 +89,54 @@ function App() {
     setError(null)
   }
 
+  const handleLogout = () => {
+    // Remove auth token and user data from localStorage
+    localStorage.removeItem('authToken')
+    localStorage.removeItem('userData')
+    // Clear user state
+    setUser(null)
+    // Reset view to signin
+    setCurrentView('signin')
+    // Clear any errors
+    setError(null)
+    // Reset active tab to signin
+    setActiveTab('signin')
+  }
+
+  // Restore session from localStorage on app mount
+  useEffect(() => {
+    const token = localStorage.getItem('authToken')
+    const userDataStr = localStorage.getItem('userData')
+    
+    if (token && userDataStr) {
+      try {
+        const userData = JSON.parse(userDataStr) as User
+        // Validate that userData has required fields
+        if (userData.id && userData.email && userData.firstName && userData.lastName) {
+          setUser(userData)
+          setCurrentView('welcome')
+          setActiveTab('signin')
+          console.log('Session restored from localStorage')
+        } else {
+          // Invalid user data structure, clear it
+          console.warn('Invalid user data structure, clearing localStorage')
+          localStorage.removeItem('authToken')
+          localStorage.removeItem('userData')
+        }
+      } catch (error) {
+        console.error('Failed to parse user data from localStorage:', error)
+        // Clear corrupted data
+        localStorage.removeItem('authToken')
+        localStorage.removeItem('userData')
+      }
+    } else if (token || userDataStr) {
+      // Only one exists, clear both to maintain consistency
+      console.warn('Incomplete session data, clearing localStorage')
+      localStorage.removeItem('authToken')
+      localStorage.removeItem('userData')
+    }
+  }, []) // Run only on mount
+
   // Debug: Log view changes
   useEffect(() => {
     console.log('Current view changed to:', currentView, 'User:', user)
@@ -96,7 +146,7 @@ function App() {
     <div className="min-h-screen bg-gradient-to-br from-gray-200 via-gray-400 to-black flex items-center justify-center p-4">
       <div className="w-full">
         {currentView === 'welcome' && user ? (
-          <WelcomeScreen user={user} />
+          <WelcomeScreen user={user} onLogout={handleLogout} />
         ) : currentView === 'otp' ? (
           <>
             <VerificationCode

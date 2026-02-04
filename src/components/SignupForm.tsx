@@ -5,7 +5,7 @@ import { Label } from './ui/label'
 import { Checkbox } from './ui/checkbox'
 import { StepIndicator } from './ui/step-indicator'
 import { signup, sendOTP, type SignupRequest } from '@/services/api'
-import { User, Phone, Building2, Mail, Lock, ArrowLeft, ArrowRight, Loader2 } from 'lucide-react'
+import { User, Phone, Building2, Mail, Lock, ArrowLeft, ArrowRight, Loader2, Check, X } from 'lucide-react'
 
 interface SignupFormProps {
   onSignupSuccess: (email: string) => void
@@ -33,11 +33,34 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
     personalEmail: '',
     acceptTermsAndConditions: false,
   })
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [errors, setErrors] = useState<Partial<Record<keyof SignupRequest, string>>>({})
+  const [errors, setErrors] = useState<Partial<Record<keyof SignupRequest | 'confirmPassword', string>>>({})
+
+  const validatePassword = (password: string): string | null => {
+    if (!password) {
+      return 'Password is required'
+    }
+    if (password.length < 8) {
+      return 'Password must be at least 8 characters'
+    }
+    if (!/[A-Z]/.test(password)) {
+      return 'Password must contain at least one uppercase letter (A-Z)'
+    }
+    if (!/[a-z]/.test(password)) {
+      return 'Password must contain at least one lowercase letter (a-z)'
+    }
+    if (!/[0-9]/.test(password)) {
+      return 'Password must contain at least one number (0-9)'
+    }
+    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+      return 'Password must contain at least one special character (!@#$%^&*()_+-=[]{};\':"|,.<>/?'
+    }
+    return null
+  }
 
   const validateStep = (step: number): boolean => {
-    const newErrors: Partial<Record<keyof SignupRequest, string>> = {}
+    const newErrors: Partial<Record<keyof SignupRequest | 'confirmPassword', string>> = {}
 
     if (step === 1) {
       if (!formData.firstName.trim()) newErrors.firstName = 'First name is required'
@@ -47,10 +70,14 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
       } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.workEmail)) {
         newErrors.workEmail = 'Invalid email format'
       }
-      if (!formData.password) {
-        newErrors.password = 'Password is required'
-      } else if (formData.password.length < 8) {
-        newErrors.password = 'Password must be at least 8 characters'
+      const passwordError = validatePassword(formData.password)
+      if (passwordError) {
+        newErrors.password = passwordError
+      }
+      if (!confirmPassword) {
+        newErrors.confirmPassword = 'Please confirm your password'
+      } else if (formData.password !== confirmPassword) {
+        newErrors.confirmPassword = 'Passwords do not match'
       }
     } else if (step === 2) {
       if (!formData.contactNo.trim()) {
@@ -79,28 +106,37 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
       return
     }
 
-    if (currentStep === 3) {
-      // Final step - submit form
-      setLoading(true)
-      try {
-        const signupResponse = await signup(formData)
-        
-        if (signupResponse.success) {
-          console.log('Sending OTP to:', formData.workEmail)
-          await sendOTP({
-            email: formData.workEmail,
-            purpose: 'emailVerification',
-          })
+      if (currentStep === 3) {
+        // Final step - submit form
+        setLoading(true)
+        try {
+          const signupResponse = await signup(formData)
           
-          await new Promise(resolve => setTimeout(resolve, 500))
-          onSignupSuccess(formData.workEmail)
+          if (signupResponse.success) {
+            console.log('Sending OTP to:', formData.workEmail)
+            await sendOTP({
+              email: formData.workEmail,
+              purpose: 'emailVerification',
+            })
+            
+            await new Promise(resolve => setTimeout(resolve, 500))
+            onSignupSuccess(formData.workEmail)
+          } else {
+            // Handle case where API returns success: false but doesn't throw
+            const errorMsg = (signupResponse as any)?.error || 'Signup failed. Please try again.'
+            onError(errorMsg)
+          }
+        } catch (error: any) {
+          console.error('Signup/OTP Error:', error)
+          // Extract error message from error object
+          const errorMessage = error?.response?.data?.error || 
+                              error?.response?.data?.message || 
+                              error?.message || 
+                              'Signup failed. Please try again.'
+          onError(errorMessage)
+        } finally {
+          setLoading(false)
         }
-      } catch (error: any) {
-        console.error('Signup/OTP Error:', error)
-        onError(error.message || 'Signup failed. Please try again.')
-      } finally {
-        setLoading(false)
-      }
     } else {
       setCurrentStep(currentStep + 1)
     }
@@ -118,7 +154,40 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
     if (errors[field]) {
       setErrors((prev) => ({ ...prev, [field]: undefined }))
     }
+    // Real-time password matching validation when password changes
+    if (field === 'password' && confirmPassword) {
+      if (confirmPassword !== value) {
+        setErrors((prev) => ({ ...prev, confirmPassword: 'Passwords do not match' }))
+      } else {
+        setErrors((prev) => ({ ...prev, confirmPassword: undefined }))
+      }
+    }
   }
+
+  const handleConfirmPasswordChange = (value: string) => {
+    setConfirmPassword(value)
+    // Real-time password matching validation
+    if (value && formData.password && value !== formData.password) {
+      setErrors((prev) => ({ ...prev, confirmPassword: 'Passwords do not match' }))
+    } else if (errors.confirmPassword) {
+      setErrors((prev) => ({ ...prev, confirmPassword: undefined }))
+    }
+  }
+
+  // Real-time password requirements checker
+  const getPasswordRequirements = (password: string) => {
+    return {
+      minLength: password.length >= 8,
+      hasUppercase: /[A-Z]/.test(password),
+      hasLowercase: /[a-z]/.test(password),
+      hasNumber: /[0-9]/.test(password),
+      hasSpecialChar: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password),
+    }
+  }
+
+  const passwordRequirements = getPasswordRequirements(formData.password)
+  const passwordsMatch = confirmPassword && formData.password && confirmPassword === formData.password
+  const showPasswordMismatch = confirmPassword && formData.password && confirmPassword !== formData.password
 
   const progress = (currentStep / steps.length) * 100
   const getStepTitle = () => {
@@ -236,7 +305,118 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
             {errors.password && (
               <p className="text-sm text-destructive">{errors.password}</p>
             )}
-            <p className="text-xs text-muted-foreground">Must be at least 8 characters</p>
+            {/* Real-time Password Requirements */}
+            {formData.password && (
+              <div className="mt-2 p-3 bg-gray-50 rounded-md border border-gray-200">
+                <p className="text-xs font-semibold text-gray-700 mb-2">Password requirements:</p>
+                <ul className="space-y-1.5">
+                  <li className={`flex items-center gap-2 text-xs transition-colors ${
+                    passwordRequirements.minLength ? 'text-green-600' : 'text-gray-500'
+                  }`}>
+                    {passwordRequirements.minLength ? (
+                      <Check className="w-3.5 h-3.5 text-green-600" />
+                    ) : (
+                      <X className="w-3.5 h-3.5 text-gray-400" />
+                    )}
+                    <span>At least 8 characters</span>
+                  </li>
+                  <li className={`flex items-center gap-2 text-xs transition-colors ${
+                    passwordRequirements.hasUppercase ? 'text-green-600' : 'text-gray-500'
+                  }`}>
+                    {passwordRequirements.hasUppercase ? (
+                      <Check className="w-3.5 h-3.5 text-green-600" />
+                    ) : (
+                      <X className="w-3.5 h-3.5 text-gray-400" />
+                    )}
+                    <span>1 Capital Letter (A-Z)</span>
+                  </li>
+                  <li className={`flex items-center gap-2 text-xs transition-colors ${
+                    passwordRequirements.hasLowercase ? 'text-green-600' : 'text-gray-500'
+                  }`}>
+                    {passwordRequirements.hasLowercase ? (
+                      <Check className="w-3.5 h-3.5 text-green-600" />
+                    ) : (
+                      <X className="w-3.5 h-3.5 text-gray-400" />
+                    )}
+                    <span>1 Lowercase Letter (a-z)</span>
+                  </li>
+                  <li className={`flex items-center gap-2 text-xs transition-colors ${
+                    passwordRequirements.hasNumber ? 'text-green-600' : 'text-gray-500'
+                  }`}>
+                    {passwordRequirements.hasNumber ? (
+                      <Check className="w-3.5 h-3.5 text-green-600" />
+                    ) : (
+                      <X className="w-3.5 h-3.5 text-gray-400" />
+                    )}
+                    <span>1 Number (0-9)</span>
+                  </li>
+                  <li className={`flex items-center gap-2 text-xs transition-colors ${
+                    passwordRequirements.hasSpecialChar ? 'text-green-600' : 'text-gray-500'
+                  }`}>
+                    {passwordRequirements.hasSpecialChar ? (
+                      <Check className="w-3.5 h-3.5 text-green-600" />
+                    ) : (
+                      <X className="w-3.5 h-3.5 text-gray-400" />
+                    )}
+                    <span>1 Special Character: ! @ # $ % ^ & * ( ) _ + - = [ ] {'{ }'} ; ' : " \ | , . &lt; &gt; / ?</span>
+                  </li>
+                </ul>
+              </div>
+            )}
+            {!formData.password && (
+              <div className="text-xs text-muted-foreground space-y-1">
+                <p>Password must contain:</p>
+                <ul className="list-disc list-inside space-y-0.5 ml-2">
+                  <li>At least 8 characters</li>
+                  <li>One uppercase letter (A-Z)</li>
+                  <li>One lowercase letter (a-z)</li>
+                  <li>One number (0-9)</li>
+                  <li>One special character: ! @ # $ % ^ & * ( ) _ + - = [ ] {'{ }'} ; ' : " \ | , . &lt; &gt; / ?</li>
+                </ul>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="confirmPassword" className="flex items-center gap-2">
+              <Lock className="w-4 h-4" />
+              Confirm Password <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="confirmPassword"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => handleConfirmPasswordChange(e.target.value)}
+              placeholder="Confirm Password"
+              className={
+                showPasswordMismatch
+                  ? 'border-destructive'
+                  : passwordsMatch
+                  ? 'border-green-500'
+                  : errors.confirmPassword
+                  ? 'border-destructive'
+                  : ''
+              }
+            />
+            {/* Real-time password matching feedback */}
+            {confirmPassword && (
+              <div className="flex items-center gap-2">
+                {passwordsMatch ? (
+                  <div className="flex items-center gap-1.5 text-xs text-green-600">
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Passwords match</span>
+                  </div>
+                ) : showPasswordMismatch ? (
+                  <div className="flex items-center gap-1.5 text-xs text-destructive">
+                    <X className="w-3.5 h-3.5" />
+                    <span>Passwords do not match</span>
+                  </div>
+                ) : null}
+              </div>
+            )}
+            {errors.confirmPassword && !showPasswordMismatch && (
+              <p className="text-sm text-destructive">{errors.confirmPassword}</p>
+            )}
           </div>
         </div>
       )}
