@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain, session } from 'electron'
 import { join } from 'path'
 import { fileURLToPath } from 'url'
 import 'dotenv/config'
@@ -29,8 +29,28 @@ function createWindow() {
       preload,
       nodeIntegration: false,
       contextIsolation: true,
+      // Disable web security to bypass CORS in development
+      // WARNING: Only use this in development, not in production
+      webSecurity: process.env.NODE_ENV === 'production',
     },
   })
+
+  // Configure session to handle CORS for development
+  if (process.env.NODE_ENV !== 'production') {
+    const ses = session.defaultSession
+    ses.webRequest.onHeadersReceived((details, callback) => {
+      // Modify response headers to allow CORS
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Access-Control-Allow-Origin': ['*'],
+          'Access-Control-Allow-Methods': ['GET, POST, PUT, DELETE, OPTIONS, PATCH'],
+          'Access-Control-Allow-Headers': ['Content-Type, Authorization, REGERE-API-KEY, X-Requested-With'],
+          'Access-Control-Allow-Credentials': ['true'],
+        },
+      })
+    })
+  }
 
   // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
@@ -99,6 +119,11 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow()
   }
+})
+
+// Handle IPC for environment variables
+ipcMain.handle('get-env', (_event, key: string) => {
+  return process.env[key] || null
 })
 
 app.whenReady().then(() => {

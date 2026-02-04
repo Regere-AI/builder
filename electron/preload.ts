@@ -29,4 +29,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     chrome: process.versions.chrome,
     electron: process.versions.electron,
   },
+  getEnv: (key: string) => ipcRenderer.invoke('get-env', key),
 })
