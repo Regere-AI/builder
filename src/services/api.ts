@@ -132,6 +132,16 @@ export interface Verify2FAResponse {
   }
 }
 
+export interface ValidateLicenseRequest {
+  licenseKey: string
+}
+
+export interface ValidateLicenseResponse {
+  validator: boolean
+  status: string
+  message: string
+}
+
 // Get API key from environment
 async function getApiKey(): Promise<string> {
   if (window.electronAPI?.getEnv) {
@@ -297,6 +307,44 @@ export async function verify2FA(
         (error.response?.data && typeof error.response.data === 'string' ? error.response.data : null) ||
         error.message || 
         '2FA verification failed'
+      
+      throw new Error(errorMessage)
+    }
+    throw error
+  }
+}
+
+// Validate license function
+export async function validateLicense(
+  data: ValidateLicenseRequest
+): Promise<ValidateLicenseResponse> {
+  try {
+    const apiClient = await createApiClient()
+    const apiKey = await getApiKey()
+    const response = await apiClient.post<ValidateLicenseResponse>(
+      '/api/licenses/validate',
+      data,
+      {
+        headers: {
+          'REGERE-API-KEY': apiKey,
+        },
+      }
+    )
+    return response.data
+  } catch (error: any) {
+    if (axios.isAxiosError(error)) {
+      console.error('Validate License Error:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        requestData: data,
+      })
+      
+      const errorMessage = 
+        error.response?.data?.message || 
+        error.response?.data?.error ||
+        (error.response?.data && typeof error.response.data === 'string' ? error.response.data : null) ||
+        error.message || 
+        'License validation failed'
       
       throw new Error(errorMessage)
     }

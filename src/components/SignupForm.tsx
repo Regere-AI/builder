@@ -4,8 +4,9 @@ import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Checkbox } from './ui/checkbox'
 import { StepIndicator } from './ui/step-indicator'
-import { signup, sendOTP, type SignupRequest } from '@/services/api'
-import { User, Phone, Building2, Mail, Lock, ArrowLeft, ArrowRight, Loader2, Check, X } from 'lucide-react'
+import { signup, sendOTP, validateLicense, type SignupRequest } from '@/services/api'
+import { User, Phone, Building2, Mail, Lock, ArrowLeft, ArrowRight, Loader2, Check, X, Key } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 interface SignupFormProps {
   onSignupSuccess: (email: string) => void
@@ -36,6 +37,11 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<Partial<Record<keyof SignupRequest | 'confirmPassword', string>>>({})
+  const [licenseKey, setLicenseKey] = useState('')
+  const [isValidatingLicense, setIsValidatingLicense] = useState(false)
+  const [licenseValidationStatus, setLicenseValidationStatus] = useState<'unvalidated' | 'valid' | 'invalid' | 'error'>('unvalidated')
+  const [licenseValidationMessage, setLicenseValidationMessage] = useState('')
+  const [isLicenseValid, setIsLicenseValid] = useState(false)
 
   const validatePassword = (password: string): string | null => {
     if (!password) {
@@ -174,6 +180,44 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
     }
   }
 
+  const handleValidateLicense = async () => {
+    if (!licenseKey.trim()) {
+      setLicenseValidationStatus('error')
+      setLicenseValidationMessage('Please enter a license key')
+      setIsLicenseValid(false)
+      return
+    }
+
+    setIsValidatingLicense(true)
+    setLicenseValidationStatus('unvalidated')
+    setLicenseValidationMessage('')
+
+    try {
+      const response = await validateLicense({ licenseKey: licenseKey.trim() })
+      
+      // Check if validator is true and status is active, inactive, or pending (not expired)
+      const validStatuses = ['active', 'inactive', 'pending']
+      const isValid = response.validator === true && validStatuses.includes(response.status.toLowerCase())
+      
+      if (isValid) {
+        setLicenseValidationStatus('valid')
+        setLicenseValidationMessage(response.message || 'License key is valid')
+        setIsLicenseValid(true)
+      } else {
+        setLicenseValidationStatus('invalid')
+        setLicenseValidationMessage(response.message || 'License key is invalid or expired')
+        setIsLicenseValid(false)
+      }
+    } catch (error: any) {
+      console.error('License validation error:', error)
+      setLicenseValidationStatus('error')
+      setLicenseValidationMessage(error?.message || 'Failed to validate license key. Please try again.')
+      setIsLicenseValid(false)
+    } finally {
+      setIsValidatingLicense(false)
+    }
+  }
+
   // Real-time password requirements checker
   const getPasswordRequirements = (password: string) => {
     return {
@@ -210,18 +254,83 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
 
   return (
     <div className="space-y-6">
+      {/* License Validation Section */}
+      <div className="space-y-3 p-4 bg-[#252526] rounded-lg border border-[#3e3e3e]">
+        <Label htmlFor="licenseKey" className="flex items-center gap-2 text-base font-semibold text-gray-200">
+          <Key className="w-5 h-5" />
+          License Key <span className="text-red-400">*</span>
+        </Label>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <Input
+              id="licenseKey"
+              value={licenseKey}
+              onChange={(e) => setLicenseKey(e.target.value)}
+              placeholder="Enter your license key"
+              className={cn(
+                "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
+                licenseValidationStatus === 'valid'
+                  ? 'border-green-500'
+                  : licenseValidationStatus === 'invalid' || licenseValidationStatus === 'error'
+                  ? 'border-red-500'
+                  : ''
+              )}
+              disabled={isValidatingLicense}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !isValidatingLicense) {
+                  handleValidateLicense()
+                }
+              }}
+            />
+          </div>
+          <Button
+            type="button"
+            onClick={handleValidateLicense}
+            disabled={isValidatingLicense || !licenseKey.trim()}
+            className="min-w-[100px] bg-[#007acc] hover:bg-[#005a9e] text-white"
+          >
+            {isValidatingLicense ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Validating...
+              </>
+            ) : (
+              'Validate'
+            )}
+          </Button>
+        </div>
+        {licenseValidationStatus !== 'unvalidated' && (
+          <div
+            className={`flex items-center gap-2 text-sm ${
+              licenseValidationStatus === 'valid'
+                ? 'text-green-400'
+                : licenseValidationStatus === 'invalid' || licenseValidationStatus === 'error'
+                ? 'text-red-400'
+                : ''
+            }`}
+          >
+            {licenseValidationStatus === 'valid' ? (
+              <Check className="w-4 h-4" />
+            ) : (
+              <X className="w-4 h-4" />
+            )}
+            <span>{licenseValidationMessage}</span>
+          </div>
+        )}
+      </div>
+
       {/* Progress Section */}
       <div className="space-y-4">
         <div className="flex justify-between items-center">
           <div>
-            <h3 className="text-2xl font-bold text-gray-900">{getStepTitle()}</h3>
-            <p className="text-sm text-gray-600 mt-1">{getStepDescription()}</p>
+            <h3 className="text-2xl font-bold text-gray-200">{getStepTitle()}</h3>
+            <p className="text-sm text-gray-400 mt-1">{getStepDescription()}</p>
           </div>
-          <span className="text-sm font-semibold text-gray-500">Step {currentStep} of {steps.length}</span>
+          <span className="text-sm font-semibold text-gray-400">Step {currentStep} of {steps.length}</span>
         </div>
-        <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden shadow-inner">
+        <div className="w-full h-2 bg-[#252526] rounded-full overflow-hidden shadow-inner border border-[#3e3e3e]">
           <div
-            className="h-full bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 transition-all duration-700 ease-out shadow-sm"
+            className="h-full bg-[#007acc] transition-all duration-700 ease-out shadow-sm"
             style={{ width: `${progress}%` }}
           />
         </div>
@@ -237,44 +346,50 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
         <div className="space-y-6 animate-in fade-in slide-in-from-right duration-300">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="firstName" className="flex items-center gap-2">
+              <Label htmlFor="firstName" className="flex items-center gap-2 text-gray-200">
                 <User className="w-4 h-4" />
-                First Name <span className="text-red-500">*</span>
+                First Name <span className="text-red-400">*</span>
               </Label>
               <Input
                 id="firstName"
                 value={formData.firstName}
                 onChange={(e) => handleChange('firstName', e.target.value)}
                 placeholder="Firstname"
-                className={errors.firstName ? 'border-destructive' : ''}
+                className={cn(
+                  "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
+                  errors.firstName ? 'border-red-500' : ''
+                )}
               />
               {errors.firstName && (
-                <p className="text-sm text-destructive">{errors.firstName}</p>
+                <p className="text-sm text-red-400">{errors.firstName}</p>
               )}
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="lastName" className="flex items-center gap-2">
+              <Label htmlFor="lastName" className="flex items-center gap-2 text-gray-200">
                 <User className="w-4 h-4" />
-                Last Name <span className="text-red-500">*</span>
+                Last Name <span className="text-red-400">*</span>
               </Label>
               <Input
                 id="lastName"
                 value={formData.lastName}
                 onChange={(e) => handleChange('lastName', e.target.value)}
                 placeholder="Lastname"
-                className={errors.lastName ? 'border-destructive' : ''}
+                className={cn(
+                  "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
+                  errors.lastName ? 'border-red-500' : ''
+                )}
               />
               {errors.lastName && (
-                <p className="text-sm text-destructive">{errors.lastName}</p>
+                <p className="text-sm text-red-400">{errors.lastName}</p>
               )}
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="workEmail" className="flex items-center gap-2">
+            <Label htmlFor="workEmail" className="flex items-center gap-2 text-gray-200">
               <Mail className="w-4 h-4" />
-              Work Email <span className="text-red-500">*</span>
+              Work Email <span className="text-red-400">*</span>
             </Label>
             <Input
               id="workEmail"
@@ -282,17 +397,20 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
               value={formData.workEmail}
               onChange={(e) => handleChange('workEmail', e.target.value)}
               placeholder="Work Email"
-              className={errors.workEmail ? 'border-destructive' : ''}
+              className={cn(
+                "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
+                errors.workEmail ? 'border-red-500' : ''
+              )}
             />
             {errors.workEmail && (
-              <p className="text-sm text-destructive">{errors.workEmail}</p>
+              <p className="text-sm text-red-400">{errors.workEmail}</p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="password" className="flex items-center gap-2">
+            <Label htmlFor="password" className="flex items-center gap-2 text-gray-200">
               <Lock className="w-4 h-4" />
-              Password <span className="text-red-500">*</span>
+              Password <span className="text-red-400">*</span>
             </Label>
             <Input
               id="password"
@@ -300,63 +418,66 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
               value={formData.password}
               onChange={(e) => handleChange('password', e.target.value)}
               placeholder="Password"
-              className={errors.password ? 'border-destructive' : ''}
+              className={cn(
+                "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
+                errors.password ? 'border-red-500' : ''
+              )}
             />
             {errors.password && (
-              <p className="text-sm text-destructive">{errors.password}</p>
+              <p className="text-sm text-red-400">{errors.password}</p>
             )}
             {/* Real-time Password Requirements */}
             {formData.password && (
-              <div className="mt-2 p-3 bg-gray-50 rounded-md border border-gray-200">
-                <p className="text-xs font-semibold text-gray-700 mb-2">Password requirements:</p>
+              <div className="mt-2 p-3 bg-[#252526] rounded-md border border-[#3e3e3e]">
+                <p className="text-xs font-semibold text-gray-300 mb-2">Password requirements:</p>
                 <ul className="space-y-1.5">
                   <li className={`flex items-center gap-2 text-xs transition-colors ${
-                    passwordRequirements.minLength ? 'text-green-600' : 'text-gray-500'
+                    passwordRequirements.minLength ? 'text-green-400' : 'text-gray-500'
                   }`}>
                     {passwordRequirements.minLength ? (
-                      <Check className="w-3.5 h-3.5 text-green-600" />
+                      <Check className="w-3.5 h-3.5 text-green-400" />
                     ) : (
-                      <X className="w-3.5 h-3.5 text-gray-400" />
+                      <X className="w-3.5 h-3.5 text-gray-500" />
                     )}
                     <span>At least 8 characters</span>
                   </li>
                   <li className={`flex items-center gap-2 text-xs transition-colors ${
-                    passwordRequirements.hasUppercase ? 'text-green-600' : 'text-gray-500'
+                    passwordRequirements.hasUppercase ? 'text-green-400' : 'text-gray-500'
                   }`}>
                     {passwordRequirements.hasUppercase ? (
-                      <Check className="w-3.5 h-3.5 text-green-600" />
+                      <Check className="w-3.5 h-3.5 text-green-400" />
                     ) : (
-                      <X className="w-3.5 h-3.5 text-gray-400" />
+                      <X className="w-3.5 h-3.5 text-gray-500" />
                     )}
                     <span>1 Capital Letter (A-Z)</span>
                   </li>
                   <li className={`flex items-center gap-2 text-xs transition-colors ${
-                    passwordRequirements.hasLowercase ? 'text-green-600' : 'text-gray-500'
+                    passwordRequirements.hasLowercase ? 'text-green-400' : 'text-gray-500'
                   }`}>
                     {passwordRequirements.hasLowercase ? (
-                      <Check className="w-3.5 h-3.5 text-green-600" />
+                      <Check className="w-3.5 h-3.5 text-green-400" />
                     ) : (
-                      <X className="w-3.5 h-3.5 text-gray-400" />
+                      <X className="w-3.5 h-3.5 text-gray-500" />
                     )}
                     <span>1 Lowercase Letter (a-z)</span>
                   </li>
                   <li className={`flex items-center gap-2 text-xs transition-colors ${
-                    passwordRequirements.hasNumber ? 'text-green-600' : 'text-gray-500'
+                    passwordRequirements.hasNumber ? 'text-green-400' : 'text-gray-500'
                   }`}>
                     {passwordRequirements.hasNumber ? (
-                      <Check className="w-3.5 h-3.5 text-green-600" />
+                      <Check className="w-3.5 h-3.5 text-green-400" />
                     ) : (
-                      <X className="w-3.5 h-3.5 text-gray-400" />
+                      <X className="w-3.5 h-3.5 text-gray-500" />
                     )}
                     <span>1 Number (0-9)</span>
                   </li>
                   <li className={`flex items-center gap-2 text-xs transition-colors ${
-                    passwordRequirements.hasSpecialChar ? 'text-green-600' : 'text-gray-500'
+                    passwordRequirements.hasSpecialChar ? 'text-green-400' : 'text-gray-500'
                   }`}>
                     {passwordRequirements.hasSpecialChar ? (
-                      <Check className="w-3.5 h-3.5 text-green-600" />
+                      <Check className="w-3.5 h-3.5 text-green-400" />
                     ) : (
-                      <X className="w-3.5 h-3.5 text-gray-400" />
+                      <X className="w-3.5 h-3.5 text-gray-500" />
                     )}
                     <span>1 Special Character: ! @ # $ % ^ & * ( ) _ + - = [ ] {'{ }'} ; ' : " \ | , . &lt; &gt; / ?</span>
                   </li>
@@ -364,7 +485,7 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
               </div>
             )}
             {!formData.password && (
-              <div className="text-xs text-muted-foreground space-y-1">
+              <div className="text-xs text-gray-400 space-y-1">
                 <p>Password must contain:</p>
                 <ul className="list-disc list-inside space-y-0.5 ml-2">
                   <li>At least 8 characters</li>
@@ -378,9 +499,9 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="confirmPassword" className="flex items-center gap-2">
+            <Label htmlFor="confirmPassword" className="flex items-center gap-2 text-gray-200">
               <Lock className="w-4 h-4" />
-              Confirm Password <span className="text-red-500">*</span>
+              Confirm Password <span className="text-red-400">*</span>
             </Label>
             <Input
               id="confirmPassword"
@@ -388,26 +509,27 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
               value={confirmPassword}
               onChange={(e) => handleConfirmPasswordChange(e.target.value)}
               placeholder="Confirm Password"
-              className={
+              className={cn(
+                "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
                 showPasswordMismatch
-                  ? 'border-destructive'
+                  ? 'border-red-500'
                   : passwordsMatch
                   ? 'border-green-500'
                   : errors.confirmPassword
-                  ? 'border-destructive'
+                  ? 'border-red-500'
                   : ''
-              }
+              )}
             />
             {/* Real-time password matching feedback */}
             {confirmPassword && (
               <div className="flex items-center gap-2">
                 {passwordsMatch ? (
-                  <div className="flex items-center gap-1.5 text-xs text-green-600">
+                  <div className="flex items-center gap-1.5 text-xs text-green-400">
                     <Check className="w-3.5 h-3.5" />
                     <span>Passwords match</span>
                   </div>
                 ) : showPasswordMismatch ? (
-                  <div className="flex items-center gap-1.5 text-xs text-destructive">
+                  <div className="flex items-center gap-1.5 text-xs text-red-400">
                     <X className="w-3.5 h-3.5" />
                     <span>Passwords do not match</span>
                   </div>
@@ -415,7 +537,7 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
               </div>
             )}
             {errors.confirmPassword && !showPasswordMismatch && (
-              <p className="text-sm text-destructive">{errors.confirmPassword}</p>
+              <p className="text-sm text-red-400">{errors.confirmPassword}</p>
             )}
           </div>
         </div>
@@ -426,38 +548,44 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
         <div className="space-y-6 animate-in fade-in slide-in-from-right duration-300">
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="countryCode" className="flex items-center gap-2">
+              <Label htmlFor="countryCode" className="flex items-center gap-2 text-gray-200">
                 <Phone className="w-4 h-4" />
-                Country Code <span className="text-red-500">*</span>
+                Country Code <span className="text-red-400">*</span>
               </Label>
               <Input
                 id="countryCode"
                 value={formData.countryCode}
                 onChange={(e) => handleChange('countryCode', e.target.value)}
                 placeholder="+91"
-                className={errors.countryCode ? 'border-destructive' : ''}
+                className={cn(
+                  "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
+                  errors.countryCode ? 'border-red-500' : ''
+                )}
               />
             </div>
 
             <div className="col-span-2 space-y-2">
-              <Label htmlFor="contactNo">Contact Number <span className="text-red-500">*</span></Label>
+              <Label htmlFor="contactNo" className="text-gray-200">Contact Number <span className="text-red-400">*</span></Label>
               <Input
                 id="contactNo"
                 value={formData.contactNo}
                 onChange={(e) => handleChange('contactNo', e.target.value)}
                 placeholder="Contact Number"
-                className={errors.contactNo ? 'border-destructive' : ''}
+                className={cn(
+                  "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
+                  errors.contactNo ? 'border-red-500' : ''
+                )}
               />
               {errors.contactNo && (
-                <p className="text-sm text-destructive">{errors.contactNo}</p>
+                <p className="text-sm text-red-400">{errors.contactNo}</p>
               )}
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="personalEmail" className="flex items-center gap-2">
+            <Label htmlFor="personalEmail" className="flex items-center gap-2 text-gray-200">
               <Mail className="w-4 h-4" />
-              Personal Email <span className="text-red-500">*</span>
+              Personal Email <span className="text-red-400">*</span>
             </Label>
             <Input
               id="personalEmail"
@@ -465,10 +593,13 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
               value={formData.personalEmail}
               onChange={(e) => handleChange('personalEmail', e.target.value)}
               placeholder="Personal Email"
-              className={errors.personalEmail ? 'border-destructive' : ''}
+              className={cn(
+                "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
+                errors.personalEmail ? 'border-red-500' : ''
+              )}
             />
             {errors.personalEmail && (
-              <p className="text-sm text-destructive">{errors.personalEmail}</p>
+              <p className="text-sm text-red-400">{errors.personalEmail}</p>
             )}
           </div>
         </div>
@@ -478,80 +609,92 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
       {currentStep === 3 && (
         <div className="space-y-6 animate-in fade-in slide-in-from-right duration-300">
           <div className="space-y-2">
-            <Label htmlFor="companyName" className="flex items-center gap-2">
+            <Label htmlFor="companyName" className="flex items-center gap-2 text-gray-200">
               <Building2 className="w-4 h-4" />
-              Company Name <span className="text-red-500">*</span>
+              Company Name <span className="text-red-400">*</span>
             </Label>
             <Input
               id="companyName"
               value={formData.companyName}
               onChange={(e) => handleChange('companyName', e.target.value)}
               placeholder="Company Name"
-              className={errors.companyName ? 'border-destructive' : ''}
+              className={cn(
+                "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
+                errors.companyName ? 'border-red-500' : ''
+              )}
             />
             {errors.companyName && (
-              <p className="text-sm text-destructive">{errors.companyName}</p>
+              <p className="text-sm text-red-400">{errors.companyName}</p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="industry" className="flex items-center gap-2">
+            <Label htmlFor="industry" className="flex items-center gap-2 text-gray-200">
               <Building2 className="w-4 h-4" />
-              Industry <span className="text-red-500">*</span>
+              Industry <span className="text-red-400">*</span>
             </Label>
             <Input
               id="industry"
               value={formData.industry}
               onChange={(e) => handleChange('industry', e.target.value)}
               placeholder="Industry"
-              className={errors.industry ? 'border-destructive' : ''}
+              className={cn(
+                "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
+                errors.industry ? 'border-red-500' : ''
+              )}
             />
             {errors.industry && (
-              <p className="text-sm text-destructive">{errors.industry}</p>
+              <p className="text-sm text-red-400">{errors.industry}</p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="designation" className="flex items-center gap-2">
+            <Label htmlFor="designation" className="flex items-center gap-2 text-gray-200">
               <User className="w-4 h-4" />
-              Designation <span className="text-red-500">*</span>
+              Designation <span className="text-red-400">*</span>
             </Label>
             <Input
               id="designation"
               value={formData.designation}
               onChange={(e) => handleChange('designation', e.target.value)}
               placeholder="Designation"
-              className={errors.designation ? 'border-destructive' : ''}
+              className={cn(
+                "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
+                errors.designation ? 'border-red-500' : ''
+              )}
             />
             {errors.designation && (
-              <p className="text-sm text-destructive">{errors.designation}</p>
+              <p className="text-sm text-red-400">{errors.designation}</p>
             )}
           </div>
 
-          <div className="flex items-start space-x-3 pt-4 border-t border-gray-200">
+          <div className="flex items-start space-x-3 pt-4 border-t border-[#3e3e3e]">
             <Checkbox
               id="acceptTerms"
               checked={formData.acceptTermsAndConditions}
               onCheckedChange={(checked) =>
                 handleChange('acceptTermsAndConditions', checked === true)
               }
-              className={errors.acceptTermsAndConditions ? 'border-destructive mt-1' : 'mt-1'}
+              className={cn(
+                "mt-1",
+                errors.acceptTermsAndConditions ? 'border-red-500' : ''
+              )}
             />
             <Label
               htmlFor="acceptTerms"
-              className="text-sm font-normal leading-relaxed cursor-pointer"
+              className="text-sm font-normal leading-relaxed cursor-pointer text-gray-200"
             >
-              I accept the terms and conditions <span className="text-red-500">*</span>
+              I accept the terms and conditions <span className="text-red-400">*</span>
             </Label>
           </div>
           {errors.acceptTermsAndConditions && (
-            <p className="text-sm text-destructive">{errors.acceptTermsAndConditions}</p>
+            <p className="text-sm text-red-400">{errors.acceptTermsAndConditions}</p>
           )}
         </div>
       )}
 
       {/* Navigation */}
-      <div className="flex items-center justify-between pt-6 border-t border-gray-200">
+      <div className="flex items-center justify-between pt-6 border-t border-[#3e3e3e]">
         <div>
           {currentStep > 1 && (
             <Button
@@ -559,7 +702,7 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
               variant="outline"
               onClick={handleBack}
               disabled={loading}
-              className="min-w-[100px]"
+              className="min-w-[100px] bg-[#2d2d2d] border-[#3e3e3e] text-gray-200 hover:bg-[#3e3e3e]"
             >
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back
@@ -570,8 +713,9 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
         <Button
           type="button"
           onClick={handleNext}
-          disabled={loading}
-          className="min-w-[100px]"
+          disabled={loading || !isLicenseValid}
+          className="min-w-[100px] bg-[#007acc] hover:bg-[#005a9e] text-white"
+          title={!isLicenseValid ? 'Please validate your license key first' : ''}
         >
           {loading ? (
             <>

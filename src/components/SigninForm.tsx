@@ -79,8 +79,8 @@ export function SigninForm({ onSigninSuccess, onError }: SigninFormProps) {
       <div className="space-y-4">
         <div className="flex justify-between items-center">
           <div>
-            <h3 className="text-2xl font-bold text-gray-900">Sign In to Your Account</h3>
-            <p className="text-sm text-gray-600 mt-1">Enter your credentials to access your account</p>
+            <h3 className="text-2xl font-bold text-gray-200">Sign In to Your Account</h3>
+            <p className="text-sm text-gray-400 mt-1">Enter your credentials to access your account</p>
           </div>
         </div>
       </div>
@@ -89,9 +89,9 @@ export function SigninForm({ onSigninSuccess, onError }: SigninFormProps) {
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="space-y-6 animate-in fade-in slide-in-from-right duration-300">
           <div className="space-y-2">
-            <Label htmlFor="signin-email" className="flex items-center gap-2">
+            <Label htmlFor="signin-email" className="flex items-center gap-2 text-gray-200">
               <Mail className="w-4 h-4" />
-              Work Email <span className="text-red-500">*</span>
+              Work Email <span className="text-red-400">*</span>
             </Label>
             <Input
               id="signin-email"
@@ -104,17 +104,19 @@ export function SigninForm({ onSigninSuccess, onError }: SigninFormProps) {
                 }
               }}
               placeholder="Work Email"
-              className={errors.workEmail ? 'border-destructive' : ''}
+              className={`bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500 ${
+                errors.workEmail ? 'border-red-500' : ''
+              }`}
             />
             {errors.workEmail && (
-              <p className="text-sm text-destructive">{errors.workEmail}</p>
+              <p className="text-sm text-red-400">{errors.workEmail}</p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="signin-password" className="flex items-center gap-2">
+            <Label htmlFor="signin-password" className="flex items-center gap-2 text-gray-200">
               <Lock className="w-4 h-4" />
-              Password <span className="text-red-500">*</span>
+              Password <span className="text-red-400">*</span>
             </Label>
             <Input
               id="signin-password"
@@ -127,17 +129,19 @@ export function SigninForm({ onSigninSuccess, onError }: SigninFormProps) {
                 }
               }}
               placeholder="Password"
-              className={errors.password ? 'border-destructive' : ''}
+              className={`bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500 ${
+                errors.password ? 'border-red-500' : ''
+              }`}
             />
             {errors.password && (
-              <p className="text-sm text-destructive">{errors.password}</p>
+              <p className="text-sm text-red-400">{errors.password}</p>
             )}
           </div>
         </div>
 
         {/* Submit Button */}
-        <div className="flex items-center justify-end pt-6 border-t border-gray-200">
-          <Button type="submit" disabled={loading} className="min-w-[100px]">
+        <div className="flex items-center justify-end pt-6 border-t border-[#3e3e3e]">
+          <Button type="submit" disabled={loading} className="min-w-[100px] bg-[#007acc] hover:bg-[#005a9e] text-white">
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />

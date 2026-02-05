@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { SignupForm } from './components/SignupForm'
 import { SigninForm } from './components/SigninForm'
 import { VerificationCode } from './components/VerificationCode'
-import { WelcomeScreen } from './components/WelcomeScreen'
+import { BuilderDashboard } from './components/BuilderDashboard'
 import { cn } from './lib/utils'
 import { Mail, Lock } from 'lucide-react'
 
@@ -143,10 +143,13 @@ function App() {
   }, [currentView, user])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-200 via-gray-400 to-black flex items-center justify-center p-4">
+    <div className={cn(
+      "min-h-screen flex items-center justify-center",
+      currentView !== 'welcome' && "bg-[#1e1e1e]"
+    )}>
       <div className="w-full">
         {currentView === 'welcome' && user ? (
-          <WelcomeScreen user={user} onLogout={handleLogout} />
+          <BuilderDashboard user={user} onLogout={handleLogout} />
         ) : currentView === 'otp' ? (
           <>
             <VerificationCode
@@ -182,22 +185,22 @@ function App() {
             )}
           </>
         ) : (
-          <div className="w-full max-w-4xl mx-auto">
-            <div className="bg-white rounded-3xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] overflow-hidden border border-gray-100">
+          <div className="w-full max-w-4xl mx-auto p-4">
+            <div className="bg-[#2d2d2d] rounded-lg shadow-lg overflow-hidden border border-[#3e3e3e]">
               {/* Toggle Tabs */}
-              <div className="flex border-b border-gray-200 bg-gradient-to-br from-gray-50 to-white">
+              <div className="flex border-b border-[#3e3e3e] bg-[#252526]">
                 <button
                   onClick={() => handleTabSwitch('signup')}
                   className={cn(
                     'flex-1 px-10 py-6 text-base font-bold transition-all duration-300 relative',
                     activeTab === 'signup'
-                      ? 'bg-gradient-to-br from-gray-800 to-gray-800 text-white shadow-lg'
-                      : 'bg-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50/50'
+                      ? 'bg-[#2d2d2d] text-gray-200'
+                      : 'bg-transparent text-gray-400 hover:text-gray-200 hover:bg-[#2a2d2e]'
                   )}
                 >
                   <span className="relative z-10">Sign Up</span>
                   {activeTab === 'signup' && (
-                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-white rounded-t-full" />
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#007acc]" />
                   )}
                 </button>
                 <button
@@ -205,13 +208,13 @@ function App() {
                   className={cn(
                     'flex-1 px-10 py-6 text-base font-bold transition-all duration-300 relative',
                     activeTab === 'signin'
-                      ? 'bg-gradient-to-br from-gray-900 to-gray-800 text-white shadow-lg'
-                      : 'bg-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-50/50'
+                      ? 'bg-[#2d2d2d] text-gray-200'
+                      : 'bg-transparent text-gray-400 hover:text-gray-200 hover:bg-[#2a2d2e]'
                   )}
                 >
                   <span className="relative z-10">Sign In</span>
                   {activeTab === 'signin' && (
-                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-white rounded-t-full" />
+                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#007acc]" />
                   )}
                 </button>
               </div>
@@ -219,8 +222,8 @@ function App() {
               {/* Form Content */}
               <div className="px-10 py-10">
                 {error && (
-                  <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg animate-in slide-in-from-top duration-300">
-                    <p className="text-sm text-red-800 font-semibold">{error}</p>
+                  <div className="mb-6 p-4 bg-red-900/20 border-l-4 border-red-500 rounded-r-lg animate-in slide-in-from-top duration-300">
+                    <p className="text-sm text-red-400 font-semibold">{error}</p>
                   </div>
                 )}
                 {activeTab === 'signup' ? (
