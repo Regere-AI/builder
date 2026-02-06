@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { SignupForm } from './components/SignupForm'
 import { SigninForm } from './components/SigninForm'
 import { VerificationCode } from './components/VerificationCode'
+import { LicenseValidation } from './components/LicenseValidation'
 import { BuilderDashboard } from './components/BuilderDashboard'
 import { cn } from './lib/utils'
 import { Mail, Lock } from 'lucide-react'
@@ -27,7 +28,7 @@ declare global {
   }
 }
 
-type View = 'signup' | 'signin' | 'otp' | '2fa' | 'welcome'
+type View = 'signup' | 'signin' | 'otp' | '2fa' | 'license' | 'welcome'
 
 interface User {
   id: string
@@ -57,26 +58,43 @@ function App() {
 
   const handleOTPSuccess = (token: string, userData: User) => {
     console.log('handleOTPSuccess called with:', { token, userData })
-    // Store token and user data for session persistence
-    localStorage.setItem('authToken', token)
-    localStorage.setItem('userData', JSON.stringify(userData))
-    // Set user and view state to trigger redirect to welcome screen
-    setUser(userData)
-    setCurrentView('welcome')
+    // After signup OTP, redirect to signin screen
+    // Store token and user data temporarily (will be used after login)
+    localStorage.setItem('signupToken', token)
+    localStorage.setItem('signupUserData', JSON.stringify(userData))
+    // Redirect to signin screen
+    setCurrentView('signin')
+    setActiveTab('signin')
     setError(null)
-    console.log('State updated - should redirect to welcome screen now')
+    // Show success message
+    console.log('Signup successful, redirecting to signin')
   }
 
   const handle2FASuccess = (token: string, userData: User) => {
     console.log('handle2FASuccess called with:', { token, userData })
+    // After login 2FA, redirect to license validation
     // Store token and user data for session persistence
     localStorage.setItem('authToken', token)
     localStorage.setItem('userData', JSON.stringify(userData))
-    // Set user and view state to trigger redirect to welcome screen
+    // Set user and view state to trigger redirect to license validation
     setUser(userData)
-    setCurrentView('welcome')
+    setCurrentView('license')
     setError(null)
-    console.log('State updated - should redirect to welcome screen now')
+    console.log('2FA successful, redirecting to license validation')
+  }
+
+  const handleLicenseValidationSuccess = () => {
+    console.log('License validation successful, redirecting to dashboard')
+    // After license validation, redirect to dashboard
+    // User data and token are already stored from handle2FASuccess
+    if (user) {
+      setCurrentView('welcome')
+      setError(null)
+    } else {
+      // If no user in state, redirect back to signin
+      setCurrentView('signin')
+      setError('Session expired. Please sign in again.')
+    }
   }
 
   const handleError = (errorMessage: string) => {
@@ -156,14 +174,14 @@ function App() {
               email={userEmail}
               purpose="emailVerification"
               title="Verify Your Email"
-              icon={<Mail className="w-10 h-10 text-primary" />}
+              icon={<Mail className="w-10 h-10 text-[#007acc]" />}
               buttonText="Verify Email"
               onVerificationSuccess={handleOTPSuccess}
               onError={handleError}
             />
             {error && (
-              <div className="max-w-3xl mx-auto mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg animate-in slide-in-from-top duration-300">
-                <p className="text-sm text-destructive font-medium">{error}</p>
+              <div className="max-w-3xl mx-auto mt-4 p-4 bg-red-900/20 border border-red-500/50 rounded-lg animate-in slide-in-from-top duration-300">
+                <p className="text-sm text-red-400 font-medium">{error}</p>
               </div>
             )}
           </>
@@ -173,17 +191,22 @@ function App() {
               email={userEmail}
               purpose="login"
               title="Two-Factor Authentication"
-              icon={<Lock className="w-10 h-10 text-primary" />}
+              icon={<Lock className="w-10 h-10 text-[#007acc]" />}
               buttonText="Verify & Continue"
               onVerificationSuccess={handle2FASuccess}
               onError={handleError}
             />
             {error && (
-              <div className="max-w-3xl mx-auto mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg animate-in slide-in-from-top duration-300">
-                <p className="text-sm text-destructive font-medium">{error}</p>
+              <div className="max-w-3xl mx-auto mt-4 p-4 bg-red-900/20 border border-red-500/50 rounded-lg animate-in slide-in-from-top duration-300">
+                <p className="text-sm text-red-400 font-medium">{error}</p>
               </div>
             )}
           </>
+        ) : currentView === 'license' ? (
+          <LicenseValidation
+            onValidationSuccess={handleLicenseValidationSuccess}
+            onError={handleError}
+          />
         ) : (
           <div className="w-full max-w-4xl mx-auto p-4">
             <div className="bg-[#2d2d2d] rounded-lg shadow-lg overflow-hidden border border-[#3e3e3e]">

@@ -87,23 +87,23 @@ export function VerificationCode({
 
   return (
     <div className="w-full max-w-2xl mx-auto">
-      <div className="bg-white rounded-3xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] overflow-hidden border border-gray-100">
-        <div className="bg-gradient-to-br from-gray-50 via-white to-gray-50 px-10 py-8 border-b border-gray-100">
-          <h2 className="text-3xl font-bold text-gray-900 tracking-tight">{title}</h2>
-          <p className="text-base text-gray-600 mt-2 font-medium">We've sent a verification code to {email}</p>
+      <div className="bg-[#2d2d2d] rounded-lg shadow-lg overflow-hidden border border-[#3e3e3e]">
+        <div className="bg-[#252526] px-10 py-8 border-b border-[#3e3e3e]">
+          <h2 className="text-3xl font-bold text-gray-200 tracking-tight">{title}</h2>
+          <p className="text-base text-gray-400 mt-2 font-medium">We've sent a verification code to {email}</p>
         </div>
 
         <div className="px-10 py-10">
           <div className="space-y-8">
             <div className="flex justify-center">
-              <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center animate-in zoom-in duration-500">
+              <div className="w-20 h-20 rounded-full bg-[#252526] border border-[#3e3e3e] flex items-center justify-center animate-in zoom-in duration-500">
                 {icon}
               </div>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6 animate-in fade-in slide-in-from-bottom duration-300">
               <div className="space-y-3">
-                <Label htmlFor={finalInputId} className="text-center block">
+                <Label htmlFor={finalInputId} className="text-center block text-gray-200">
                   <Shield className="w-5 h-5 inline mr-2" />
                   Enter Verification Code
                 </Label>
@@ -115,17 +115,17 @@ export function VerificationCode({
                   onChange={handleCodeChange}
                   placeholder="000000"
                   maxLength={6}
-                  className="text-center text-3xl tracking-[0.5em] font-mono h-16 text-2xl"
+                  className="text-center text-3xl tracking-[0.5em] font-mono h-16 bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500"
                   autoFocus
                 />
-                <p className="text-xs text-muted-foreground text-center">
+                <p className="text-xs text-gray-400 text-center">
                   Enter the 6-digit code sent to your email
                 </p>
               </div>
 
               <Button 
                 type="submit" 
-                className="w-full h-12 text-base font-semibold" 
+                className="w-full h-12 text-base font-semibold bg-[#007acc] hover:bg-[#005a9e] text-white" 
                 disabled={loading || code.length !== 6}
               >
                 {loading ? (

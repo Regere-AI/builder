@@ -22,11 +22,11 @@ export function StepIndicator({ steps, currentStep, completedSteps = [], classNa
     <div className={cn('w-full', className)}>
       <div className="relative flex items-center justify-between">
         {/* Background connector line */}
-        <div className="absolute top-5 left-0 right-0 h-0.5 bg-muted -z-10" />
+        <div className="absolute top-5 left-0 right-0 h-0.5 bg-[#3e3e3e] -z-10" />
         
         {/* Progress connector line */}
         <div
-          className="absolute top-5 left-0 h-0.5 bg-primary transition-all duration-300 -z-10"
+          className="absolute top-5 left-0 h-0.5 bg-[#007acc] transition-all duration-300 -z-10"
           style={{
             width: `${((currentStep - 1) / (steps.length - 1)) * 100}%`,
           }}
@@ -39,10 +39,10 @@ export function StepIndicator({ steps, currentStep, completedSteps = [], classNa
               className={cn(
                 'w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-300 relative z-10',
                 isCompleted(step.id)
-                  ? 'bg-primary border-primary text-primary-foreground'
+                  ? 'bg-[#007acc] border-[#007acc] text-white'
                   : isCurrent(step.id)
-                  ? 'bg-primary border-primary text-primary-foreground ring-4 ring-primary/20'
-                  : 'bg-background border-muted text-muted-foreground'
+                  ? 'bg-[#1e1e1e] border-[#007acc] text-white ring-4 ring-[#007acc]/20'
+                  : 'bg-[#252526] border-[#3e3e3e] text-gray-400'
               )}
             >
               {isCompleted(step.id) ? (
@@ -58,8 +58,8 @@ export function StepIndicator({ steps, currentStep, completedSteps = [], classNa
               className={cn(
                 'mt-2 text-xs font-medium transition-colors text-center',
                 isCompleted(step.id) || isCurrent(step.id)
-                  ? 'text-foreground'
-                  : 'text-muted-foreground'
+                  ? 'text-gray-200'
+                  : 'text-gray-400'
               )}
             >
               {step.label}

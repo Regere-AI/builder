@@ -4,8 +4,8 @@ import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Checkbox } from './ui/checkbox'
 import { StepIndicator } from './ui/step-indicator'
-import { signup, sendOTP, validateLicense, type SignupRequest } from '@/services/api'
-import { User, Phone, Building2, Mail, Lock, ArrowLeft, ArrowRight, Loader2, Check, X, Key } from 'lucide-react'
+import { signup, sendOTP, type SignupRequest } from '@/services/api'
+import { User, Phone, Building2, Mail, Lock, ArrowLeft, ArrowRight, Loader2, Check, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface SignupFormProps {
@@ -37,11 +37,6 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<Partial<Record<keyof SignupRequest | 'confirmPassword', string>>>({})
-  const [licenseKey, setLicenseKey] = useState('')
-  const [isValidatingLicense, setIsValidatingLicense] = useState(false)
-  const [licenseValidationStatus, setLicenseValidationStatus] = useState<'unvalidated' | 'valid' | 'invalid' | 'error'>('unvalidated')
-  const [licenseValidationMessage, setLicenseValidationMessage] = useState('')
-  const [isLicenseValid, setIsLicenseValid] = useState(false)
 
   const validatePassword = (password: string): string | null => {
     if (!password) {
@@ -180,44 +175,6 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
     }
   }
 
-  const handleValidateLicense = async () => {
-    if (!licenseKey.trim()) {
-      setLicenseValidationStatus('error')
-      setLicenseValidationMessage('Please enter a license key')
-      setIsLicenseValid(false)
-      return
-    }
-
-    setIsValidatingLicense(true)
-    setLicenseValidationStatus('unvalidated')
-    setLicenseValidationMessage('')
-
-    try {
-      const response = await validateLicense({ licenseKey: licenseKey.trim() })
-      
-      // Check if validator is true and status is active, inactive, or pending (not expired)
-      const validStatuses = ['active', 'inactive', 'pending']
-      const isValid = response.validator === true && validStatuses.includes(response.status.toLowerCase())
-      
-      if (isValid) {
-        setLicenseValidationStatus('valid')
-        setLicenseValidationMessage(response.message || 'License key is valid')
-        setIsLicenseValid(true)
-      } else {
-        setLicenseValidationStatus('invalid')
-        setLicenseValidationMessage(response.message || 'License key is invalid or expired')
-        setIsLicenseValid(false)
-      }
-    } catch (error: any) {
-      console.error('License validation error:', error)
-      setLicenseValidationStatus('error')
-      setLicenseValidationMessage(error?.message || 'Failed to validate license key. Please try again.')
-      setIsLicenseValid(false)
-    } finally {
-      setIsValidatingLicense(false)
-    }
-  }
-
   // Real-time password requirements checker
   const getPasswordRequirements = (password: string) => {
     return {
@@ -254,71 +211,6 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
 
   return (
     <div className="space-y-6">
-      {/* License Validation Section */}
-      <div className="space-y-3 p-4 bg-[#252526] rounded-lg border border-[#3e3e3e]">
-        <Label htmlFor="licenseKey" className="flex items-center gap-2 text-base font-semibold text-gray-200">
-          <Key className="w-5 h-5" />
-          License Key <span className="text-red-400">*</span>
-        </Label>
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <Input
-              id="licenseKey"
-              value={licenseKey}
-              onChange={(e) => setLicenseKey(e.target.value)}
-              placeholder="Enter your license key"
-              className={cn(
-                "bg-[#252526] border-[#3e3e3e] text-gray-200 placeholder:text-gray-500",
-                licenseValidationStatus === 'valid'
-                  ? 'border-green-500'
-                  : licenseValidationStatus === 'invalid' || licenseValidationStatus === 'error'
-                  ? 'border-red-500'
-                  : ''
-              )}
-              disabled={isValidatingLicense}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !isValidatingLicense) {
-                  handleValidateLicense()
-                }
-              }}
-            />
-          </div>
-          <Button
-            type="button"
-            onClick={handleValidateLicense}
-            disabled={isValidatingLicense || !licenseKey.trim()}
-            className="min-w-[100px] bg-[#007acc] hover:bg-[#005a9e] text-white"
-          >
-            {isValidatingLicense ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Validating...
-              </>
-            ) : (
-              'Validate'
-            )}
-          </Button>
-        </div>
-        {licenseValidationStatus !== 'unvalidated' && (
-          <div
-            className={`flex items-center gap-2 text-sm ${
-              licenseValidationStatus === 'valid'
-                ? 'text-green-400'
-                : licenseValidationStatus === 'invalid' || licenseValidationStatus === 'error'
-                ? 'text-red-400'
-                : ''
-            }`}
-          >
-            {licenseValidationStatus === 'valid' ? (
-              <Check className="w-4 h-4" />
-            ) : (
-              <X className="w-4 h-4" />
-            )}
-            <span>{licenseValidationMessage}</span>
-          </div>
-        )}
-      </div>
-
       {/* Progress Section */}
       <div className="space-y-4">
         <div className="flex justify-between items-center">
@@ -713,9 +605,8 @@ export function SignupForm({ onSignupSuccess, onError }: SignupFormProps) {
         <Button
           type="button"
           onClick={handleNext}
-          disabled={loading || !isLicenseValid}
+          disabled={loading}
           className="min-w-[100px] bg-[#007acc] hover:bg-[#005a9e] text-white"
-          title={!isLicenseValid ? 'Please validate your license key first' : ''}
         >
           {loading ? (
             <>
