@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { fileURLToPath } from 'url'
 import 'dotenv/config'
@@ -13,10 +13,7 @@ process.env.VITE_PUBLIC = app.isPackaged
 let win: BrowserWindow | null = null
 // Here, you can also use other preload
 const preload = join(__dirname, '../preload/index.js')
-// 🚧 Use ['ENV_NAME'] avoid vite:define plugin - vite:define plugin will replace
-// the string literal with the actual value at build time
-// In development, electron-vite injects this via define plugin
-// The define plugin replaces process.env.VITE_DEV_SERVER_URL at build time
+
 const url = process.env["APP_BASE_URL"]
 
 
@@ -32,19 +29,9 @@ function createWindow() {
     },
   })
 
-  // Test active push message to Renderer-process.
-  win.webContents.on('did-finish-load', () => {
-    win?.webContents.send('main-process-message', new Date().toLocaleString())
-  })
-
   // In development, VITE_DEV_SERVER_URL is injected by electron-vite
   // If not injected, try default Vite dev server URL
   const devServerUrl = url || (process.env.NODE_ENV !== 'production' ? 'http://localhost:5173' : undefined)
-  
-  console.log('APP_BASE_URL:', url)
-  console.log('devServerUrl:', devServerUrl)
-  console.log('NODE_ENV:', process.env.NODE_ENV)
-  console.log('app.isPackaged:', app.isPackaged)
   
   // Add error handlers
   win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
@@ -55,13 +42,8 @@ function createWindow() {
     })
   })
 
-  win.webContents.on('dom-ready', () => {
-    console.log('DOM is ready')
-  })
-
   if (devServerUrl && !app.isPackaged) {
     // Development: load from Vite dev server
-    console.log('Loading from dev server:', devServerUrl)
     win.loadURL(devServerUrl).catch((err) => {
       console.error('Failed to load URL:', err)
       // Show error in window
@@ -99,6 +81,11 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow()
   }
+})
+
+// Handle IPC for environment variables
+ipcMain.handle('get-env', (_event, key: string) => {
+  return process.env[key] || null
 })
 
 app.whenReady().then(() => {
