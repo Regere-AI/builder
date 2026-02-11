@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { SignupForm } from './components/SignupForm'
-import { SigninForm } from './components/SigninForm'
-import { VerificationCode } from './components/VerificationCode'
-import { LicenseValidation } from './components/LicenseValidation'
-import { BuilderDashboard } from './components/BuilderDashboard'
+import { SignupForm } from './components/auth/SignupForm'
+import { SigninForm } from './components/auth/SigninForm'
+import { VerificationCode } from './components/auth/VerificationCode'
+import { LicenseValidation } from './components/auth/LicenseValidation'
+import { IDELayout } from './components/ide/IDELayout'
 import { cn } from './lib/utils'
 import { Mail, Lock } from 'lucide-react'
 
@@ -18,6 +18,15 @@ declare global {
         electron: string
       }
       getEnv: (key: string) => Promise<string | null>
+      // File operations
+      saveFile: (content: string, defaultPath?: string) => Promise<{ success: boolean; filePath?: string; error?: string; canceled?: boolean }>
+      openFile: () => Promise<{ success: boolean; filePath?: string; content?: string; error?: string; canceled?: boolean }>
+      // Menu event listeners
+      onMenuNewFile: (callback: () => void) => void
+      onMenuOpenRequested: (callback: () => void) => void
+      onMenuSaveRequested: (callback: () => void) => void
+      onMenuSaveAsRequested: (callback: () => void) => void
+      removeMenuListeners: () => void
     }
     ipcRenderer?: {
       on: (channel: string, listener: (event: any, ...args: any[]) => void) => void
@@ -167,7 +176,7 @@ function App() {
     )}>
       <div className="w-full">
         {currentView === 'welcome' && user ? (
-          <BuilderDashboard user={user} onLogout={handleLogout} />
+          <IDELayout user={user} onLogout={handleLogout}  />
         ) : currentView === 'otp' ? (
           <>
             <VerificationCode
