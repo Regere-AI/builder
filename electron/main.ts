@@ -99,7 +99,7 @@ ipcMain.handle('save-file', async (_event, content: string, defaultPath?: string
       { name: 'Text Files', extensions: ['txt'] },
       { name: 'All Files', extensions: ['*'] }
     ],
-    defaultPath: defaultPath || 'untitled.json'
+    defaultPath: defaultPath
   })
   
   if (!result.canceled && result.filePath) {

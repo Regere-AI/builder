@@ -29,12 +29,12 @@ export function IDELayout({ user, onLogout, agentResponse, activeProject }: IDEL
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
       const modifierKey = isMac ? e.metaKey : e.ctrlKey
       
-      if (modifierKey && e.key === 'l') {
+      if (modifierKey && ( e.key === 'k' || e.key === 'K' )) {
         e.preventDefault()
         setChatPanelOpen((prev) => !prev)
       }
 
-      if (modifierKey && e.key === 'b') {
+      if (modifierKey && ( e.key === 'b' || e.key === 'B' )) {
         e.preventDefault()
         setSidebarExpanded((prev) => !prev)
       }
