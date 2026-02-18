@@ -1,24 +1,65 @@
-import { useState, useEffect } from 'react'
-import { Rocket, ChevronRight, Plus, X } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { Rocket, Plus, X, Mail, Check, Globe, Pencil, Trash2, Search } from 'lucide-react'
 import { Button } from '../ui/button'
-import { launchpadList, launchpadAdd, launchpadGet, type LaunchpadConfig } from '@/services/api'
+import {
+  launchpadList,
+  launchpadAdd,
+  launchpadUpdate,
+  launchpadDelete,
+  launchpadGet,
+  type LaunchpadConfig,
+  type LaunchpadEnvironment,
+} from '@/services/api'
 import { cn } from '@/lib/utils'
+
+const DEFAULT_COLOR = '#007acc'
+const ENVIRONMENTS: { value: LaunchpadEnvironment; label: string }[] = [
+  { value: 'dev', label: 'Dev' },
+  { value: 'qa', label: 'QA' },
+  { value: 'prod', label: 'Prod' },
+]
+
+function getHostLabel(url: string): string {
+  try {
+    const u = new URL(url.startsWith('http') ? url : `https://${url}`)
+    return u.hostname.replace(/^www\./, '')
+  } catch {
+    return url.replace(/^https?:\/\//, '').replace(/\/$/, '').slice(0, 32) || 'Launchpad'
+  }
+}
 
 interface LaunchpadSelectPageProps {
   user: { firstName: string; lastName: string; email: string }
   onGetIn: (selectedLaunchpad: LaunchpadConfig | null) => void
 }
 
-const initialForm = { url: '', email: '', password: '' }
+const initialForm = { url: '', email: '', password: '', color: DEFAULT_COLOR, environment: 'dev' as LaunchpadEnvironment, customerName: '' }
 
 export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps) {
   const [launchpads, setLaunchpads] = useState<LaunchpadConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)
+  const [removeConfirmId, setRemoveConfirmId] = useState<string | null>(null)
   const [form, setForm] = useState(initialForm)
   const [formError, setFormError] = useState<string | null>(null)
   const [formSubmitting, setFormSubmitting] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredLaunchpads = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return launchpads
+    return launchpads.filter((c) => {
+      const url = (c.url ?? '').toLowerCase()
+      const email = (c.email ?? '').toLowerCase()
+      const customerName = (c.customerName ?? '').toLowerCase()
+      const env = (c.environment ?? 'dev').toLowerCase()
+      return url.includes(q) || email.includes(q) || customerName.includes(q) || env.includes(q)
+    })
+  }, [launchpads, searchQuery])
+
+  const showSearch = launchpads.length > 7
 
   const loadLaunchpads = () => {
     launchpadList()
@@ -33,30 +74,41 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
       .finally(() => setLoading(false))
   }, [])
 
-  const canGetIn = launchpads.length > 0 && selectedId !== null
-
-  const handleGetIn = () => {
-    if (launchpads.length > 0 && selectedId) {
-      const full = launchpadGet(selectedId)
-      onGetIn(full ?? launchpads.find((c) => c.id === selectedId) ?? null)
-    } else {
-      onGetIn(null)
-    }
+  const handleConnect = (config: LaunchpadConfig) => {
+    const full = launchpadGet(config.id)
+    onGetIn(full ?? config)
   }
 
   const openDialog = () => {
+    setEditId(null)
     setForm(initialForm)
+    setFormError(null)
+    setDialogOpen(true)
+  }
+
+  const openEditDialog = (config: LaunchpadConfig) => {
+    const full = launchpadGet(config.id)
+    setEditId(config.id)
+    setForm({
+      url: config.url,
+      email: config.email,
+      password: full?.password ?? '',
+      color: config.color ?? DEFAULT_COLOR,
+      environment: config.environment ?? 'dev',
+      customerName: config.customerName ?? '',
+    })
     setFormError(null)
     setDialogOpen(true)
   }
 
   const closeDialog = () => {
     setDialogOpen(false)
+    setEditId(null)
     setForm(initialForm)
     setFormError(null)
   }
 
-  const handleAddLaunchpad = async () => {
+  const handleSaveLaunchpad = async () => {
     const url = form.url.trim()
     const email = form.email.trim()
     if (!url) {
@@ -67,108 +119,230 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
       setFormError('Email is required')
       return
     }
-    if (!form.password) {
+    if (!editId && !form.password) {
       setFormError('Password is required')
       return
     }
     setFormSubmitting(true)
     setFormError(null)
     try {
-      await launchpadAdd({ url, email, password: form.password })
+      if (editId) {
+        await launchpadUpdate(editId, {
+          url,
+          email,
+          ...(form.password ? { password: form.password } : {}),
+          color: form.color || DEFAULT_COLOR,
+          environment: form.environment,
+          customerName: form.customerName.trim() || undefined,
+        })
+      } else {
+        await launchpadAdd({ url, email, password: form.password, color: form.color || DEFAULT_COLOR, environment: form.environment, customerName: form.customerName.trim() || undefined })
+      }
       loadLaunchpads()
       closeDialog()
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : 'Failed to add launchpad')
+      setFormError(e instanceof Error ? e.message : 'Failed to save launchpad')
     } finally {
       setFormSubmitting(false)
     }
   }
 
+  const handleRemoveLaunchpad = async (id: string) => {
+    try {
+      await launchpadDelete(id)
+      if (selectedId === id) setSelectedId(null)
+      loadLaunchpads()
+      setRemoveConfirmId(null)
+    } catch {
+      // ignore
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-[#1e1e1e] flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl bg-[#2d2d2d] border border-[#3e3e3e] mb-4">
-            <Rocket className="w-7 h-7 text-[#007acc]" />
+    <div className="min-h-screen bg-[#1e1e1e] flex flex-col items-center p-6 overflow-auto">
+      <div className="w-full max-w-4xl">
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[#007acc] to-[#005a9e] shadow-lg shadow-[#007acc]/20 mb-5">
+            <Rocket className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-semibold text-gray-200">
+          <h1 className="text-3xl font-bold text-gray-100 tracking-tight">
             Choose your launchpad
           </h1>
-          <p className="text-gray-500 mt-2">
-            Hi {user.firstName}, select a launchpad to get started or continue to Builder.
+          <p className="text-gray-400 mt-2 text-lg">
+            Hi {user.firstName}, pick an environment to start building.
           </p>
         </div>
 
         {loading ? (
-          <div className="text-gray-500 text-center py-12">Loading launchpads…</div>
+          <div className="flex justify-center py-16">
+            <div className="flex flex-col items-center gap-3 text-gray-500">
+              <div className="w-10 h-10 rounded-full border-2 border-[#007acc] border-t-transparent animate-spin" />
+              <span>Loading launchpads…</span>
+            </div>
+          </div>
         ) : (
           <>
             {launchpads.length > 0 ? (
-          <div className="space-y-3 mb-6">
-            {launchpads.map((config) => (
-              <button
-                key={config.id}
-                type="button"
-                onClick={() => setSelectedId(config.id)}
-                className={cn(
-                  'w-full rounded-lg border p-4 text-left transition-colors flex items-center justify-between gap-3',
-                  selectedId === config.id
-                    ? 'border-[#007acc] bg-[#007acc]/10'
-                    : 'border-[#3e3e3e] bg-[#2d2d2d] hover:border-[#5e5e5e] hover:bg-[#353535]'
+              <div className="mb-8">
+                {showSearch && (
+                  <div className="relative mb-4">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search by URL, email, customer or environment…"
+                      className="w-full rounded-lg border border-[#3e3e3e] bg-[#2d2d2d] pl-10 pr-4 py-2.5 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded text-gray-400 hover:text-gray-200"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 )}
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-gray-200 font-medium truncate" title={config.url}>
-                    {config.url}
-                  </p>
-                  <p className="text-gray-500 text-sm truncate" title={config.email}>
-                    {config.email}
-                  </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {filteredLaunchpads.map((config) => {
+                    const isSelected = selectedId === config.id
+                    const hostLabel = getHostLabel(config.url)
+                    const accentColor = config.color ?? DEFAULT_COLOR
+                    return (
+                      <div
+                        key={config.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelectedId(config.id)}
+                        onKeyDown={(e) => e.key === 'Enter' && setSelectedId(config.id)}
+                        className={cn(
+                          'group relative rounded-2xl border-2 text-left overflow-hidden transition-all duration-200 cursor-pointer',
+                          'hover:shadow-xl hover:shadow-black/20 hover:-translate-y-0.5',
+                          'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#1e1e1e]',
+                          isSelected
+                            ? 'border-[#007acc] bg-[#007acc]/5 shadow-lg shadow-[#007acc]/15 focus-visible:ring-[#007acc]'
+                            : 'border-[#3e3e3e] bg-[#2d2d2d] hover:border-[#5e5e5e] focus-visible:ring-[#5e5e5e]'
+                        )}
+                      >
+                        <div
+                          className="h-20 flex items-center justify-center transition-opacity group-hover:opacity-95"
+                          style={{
+                            background: isSelected
+                              ? `linear-gradient(135deg, ${accentColor}, ${accentColor}dd)`
+                              : undefined,
+                            backgroundColor: !isSelected ? '#353535' : undefined,
+                          }}
+                        >
+                          <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-white/10">
+                            <Globe className="w-6 h-6 text-white/90" />
+                          </div>
+                        </div>
+                        <div className="absolute top-3 right-3 flex items-center gap-1">
+                          {isSelected && (
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium text-white mr-1" style={{ backgroundColor: accentColor }}>
+                              Active
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); openEditDialog(config) }}
+                            className="p-2 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-white/10"
+                            title="Edit"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setRemoveConfirmId(config.id) }}
+                            className="p-2 rounded-lg text-gray-400 hover:text-red-300 hover:bg-red-400/20"
+                            title="Remove"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="p-5">
+                          {config.customerName && (
+                            <p className="text-gray-500 text-sm truncate mb-0.5" title={config.customerName}>
+                              {config.customerName}
+                            </p>
+                          )}
+                          <p className="text-gray-100 font-semibold text-lg truncate" title={config.url}>
+                            {hostLabel}
+                          </p>
+                          <div className="flex items-center gap-2 mt-2 text-gray-400 text-sm">
+                            <Mail className="w-4 h-4 shrink-0 opacity-80" />
+                            <span className="truncate" title={config.email}>{config.email}</span>
+                          </div>
+                          {isSelected && (
+                            <div className="mt-4 flex items-center gap-2 text-sm font-medium" style={{ color: accentColor }}>
+                              <div className="flex items-center justify-center w-5 h-5 rounded-full bg-white/20" style={{ backgroundColor: `${accentColor}33` }}>
+                                <Check className="w-3 h-3" />
+                              </div>
+                              Selected
+                            </div>
+                          )}
+                          <div className="mt-4 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleConnect(config) }}
+                              className="flex-1 rounded-lg px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+                              style={{ backgroundColor: accentColor }}
+                            >
+                              Connect
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {/* Add new card */}
+                  <button
+                    type="button"
+                    onClick={openDialog}
+                    className="flex flex-col items-center justify-center min-h-[220px] rounded-2xl border-2 border-dashed border-[#4e4e4e] bg-[#2d2d2d]/50 hover:border-[#007acc] hover:bg-[#007acc]/5 transition-all duration-200 group"
+                  >
+                    <div className="flex items-center justify-center w-14 h-14 rounded-full bg-[#3e3e3e] group-hover:bg-[#007acc]/20 mb-3 transition-colors">
+                      <Plus className="w-7 h-7 text-gray-400 group-hover:text-[#007acc]" />
+                    </div>
+                    <span className="text-gray-400 group-hover:text-gray-300 font-medium">Add launchpad</span>
+                    <span className="text-gray-500 text-sm mt-1">Connect a new environment</span>
+                  </button>
                 </div>
-                <ChevronRight
-                  className={cn(
-                    'w-5 h-5 shrink-0',
-                    selectedId === config.id ? 'text-[#007acc]' : 'text-gray-500'
-                  )}
-                />
-              </button>
-            ))}
-          </div>
+                {showSearch && searchQuery && filteredLaunchpads.length === 0 && (
+                  <p className="text-gray-500 text-sm mt-3">No launchpads match your search.</p>
+                )}
+              </div>
             ) : (
-          <div className="rounded-lg border border-[#3e3e3e] bg-[#2d2d2d] p-6 text-center mb-6">
-            <p className="text-gray-500">
-              No launchpads configured yet. Add one below. (Stored locally in this browser/app.)
-            </p>
-          </div>
+              <div className="mb-8">
+                <button
+                  type="button"
+                  onClick={openDialog}
+                  className="flex flex-col items-center justify-center min-h-[220px] w-[280px] rounded-2xl border-2 border-dashed border-[#4e4e4e] bg-[#2d2d2d]/50 hover:border-[#007acc] hover:bg-[#007acc]/5 transition-all duration-200 group"
+                >
+                  <div className="flex items-center justify-center w-14 h-14 rounded-full bg-[#3e3e3e] group-hover:bg-[#007acc]/20 mb-3 transition-colors">
+                    <Plus className="w-7 h-7 text-gray-400 group-hover:text-[#007acc]" />
+                  </div>
+                  <span className="text-gray-400 group-hover:text-gray-300 font-medium">Add launchpad</span>
+                  <span className="text-gray-500 text-sm mt-1">Connect a new environment</span>
+                </button>
+              </div>
             )}
-            <div className="flex justify-center mb-8">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={openDialog}
-                className="border-[#3e3e3e] bg-[#2d2d2d] text-gray-300 hover:bg-[#3e3e3e]"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add launchpad
-              </Button>
-            </div>
+
+            {launchpads.length === 0 && (
+              <div className="rounded-2xl border border-[#3e3e3e] bg-[#2d2d2d]/80 p-8 text-center mb-6">
+                <p className="text-gray-400">
+                  No launchpads yet. Add one using the card above to get started.
+                </p>
+              </div>
+            )}
           </>
         )}
 
-        {launchpads.length > 0 && (
-          <div className="flex justify-center">
-            <Button
-              onClick={handleGetIn}
-              disabled={!canGetIn}
-              className="bg-[#007acc] text-white hover:bg-[#0098e6] px-8"
-            >
-              Get in
-            </Button>
-          </div>
-        )}
       </div>
 
-      {/* Add launchpad dialog */}
+      {/* Add / Edit launchpad dialog */}
       {dialogOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
@@ -179,7 +353,9 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-4 border-b border-[#3e3e3e]">
-              <h2 className="text-lg font-semibold text-gray-200">Add launchpad</h2>
+              <h2 className="text-lg font-semibold text-gray-200">
+                {editId ? 'Edit launchpad' : 'Add launchpad'}
+              </h2>
               <button
                 type="button"
                 onClick={closeDialog}
@@ -192,12 +368,22 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
               className="p-4 space-y-4"
               onSubmit={(e) => {
                 e.preventDefault()
-                handleAddLaunchpad()
+                handleSaveLaunchpad()
               }}
             >
               {formError && (
                 <p className="text-sm text-red-400">{formError}</p>
               )}
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-1.5">Customer name (optional)</label>
+                <input
+                  type="text"
+                  value={form.customerName}
+                  onChange={(e) => setForm((f) => ({ ...f, customerName: e.target.value }))}
+                  placeholder="e.g. Acme Corp"
+                  className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                />
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-400 mb-1.5">URL</label>
                 <input
@@ -224,9 +410,47 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
                   type="password"
                   value={form.password}
                   onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  placeholder="••••••••"
+                  placeholder={editId ? 'Leave blank to keep current' : '••••••••'}
                   className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-1.5">Environment</label>
+                <div className="flex gap-2">
+                  {ENVIRONMENTS.map((env) => (
+                    <button
+                      key={env.value}
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, environment: env.value }))}
+                      className={cn(
+                        'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
+                        form.environment === env.value
+                          ? 'border-[#007acc] bg-[#007acc]/20 text-[#007acc]'
+                          : 'border-[#3e3e3e] bg-[#1e1e1e] text-gray-400 hover:border-[#5e5e5e] hover:text-gray-300'
+                      )}
+                    >
+                      {env.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-1.5">Color</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={form.color}
+                    onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                    className="h-10 w-14 cursor-pointer rounded border border-[#3e3e3e] bg-[#1e1e1e] p-0.5"
+                  />
+                  <input
+                    type="text"
+                    value={form.color}
+                    onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                    placeholder="#007acc"
+                    className="flex-1 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc] font-mono text-sm"
+                  />
+                </div>
               </div>
               <div className="flex gap-2 pt-2">
                 <Button
@@ -242,10 +466,43 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
                   disabled={formSubmitting}
                   className="flex-1 bg-[#007acc] text-white hover:bg-[#0098e6]"
                 >
-                  {formSubmitting ? 'Adding…' : 'Add'}
+                  {formSubmitting ? 'Saving…' : editId ? 'Save' : 'Add'}
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Remove confirmation */}
+      {removeConfirmId && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60"
+          onClick={(e) => e.target === e.currentTarget && setRemoveConfirmId(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-[#3e3e3e] bg-[#2d2d2d] shadow-xl p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-gray-200 font-medium mb-1">Remove this launchpad?</p>
+            <p className="text-gray-500 text-sm mb-5">This cannot be undone.</p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setRemoveConfirmId(null)}
+                className="flex-1 border-[#3e3e3e] text-gray-300 hover:bg-[#3e3e3e]"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => handleRemoveLaunchpad(removeConfirmId)}
+                className="flex-1 bg-red-600 text-white hover:bg-red-700"
+              >
+                Remove
+              </Button>
+            </div>
           </div>
         </div>
       )}
