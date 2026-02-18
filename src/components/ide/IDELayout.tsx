@@ -3,6 +3,7 @@ import { LeftSidebar } from './LeftSidebar'
 import { BuilderDashboard } from './BuilderDashboard'
 import { ChatPanel } from './ChatPanel'
 import { StatusBar } from './StatusBar'
+import type { LaunchpadConfig } from '@/services/api'
 
 interface User {
   firstName: string
@@ -14,10 +15,12 @@ interface IDELayoutProps {
   user: User
   agentResponse?: any
   activeProject?: any
+  selectedLaunchpad?: LaunchpadConfig | null
   onLogout: () => void
+  onSwitchLaunchpad: () => void
 }
 
-export function IDELayout({ user, onLogout, agentResponse, activeProject }: IDELayoutProps) {
+export function IDELayout({ user, onLogout, agentResponse, activeProject, selectedLaunchpad, onSwitchLaunchpad }: IDELayoutProps) {
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
   const [chatPanelWidth, setChatPanelWidth] = useState(320)
@@ -69,7 +72,7 @@ export function IDELayout({ user, onLogout, agentResponse, activeProject }: IDEL
       </div>
 
       {/* Status Bar */}
-      <StatusBar onLogout={onLogout} />
+      <StatusBar onLogout={onLogout} selectedLaunchpad={selectedLaunchpad} onSwitchLaunchpad={onSwitchLaunchpad} />
     </div>
   )
 }

@@ -4,10 +4,12 @@ import { SigninForm } from './components/auth/SigninForm'
 import { VerificationCode } from './components/auth/VerificationCode'
 import { LicenseValidation } from './components/auth/LicenseValidation'
 import { IDELayout } from './components/ide/IDELayout'
+import { LaunchpadSelectPage } from './components/ide/LaunchpadSelectPage'
 import { cn } from './lib/utils'
 import { Mail, Lock } from 'lucide-react'
+import type { LaunchpadConfig } from './services/api'
 
-type View = 'signup' | 'signin' | 'otp' | '2fa' | 'license' | 'welcome'
+type View = 'signup' | 'signin' | 'otp' | '2fa' | 'license' | 'launchpad' | 'welcome'
 
 interface User {
   id: string
@@ -21,6 +23,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<'signup' | 'signin'>('signup')
   const [userEmail, setUserEmail] = useState('')
   const [user, setUser] = useState<User | null>(null)
+  const [selectedLaunchpad, setSelectedLaunchpad] = useState<LaunchpadConfig | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const handleSignupSuccess = (email: string) => {
@@ -63,17 +66,20 @@ function App() {
   }
 
   const handleLicenseValidationSuccess = () => {
-    console.log('License validation successful, redirecting to dashboard')
-    // After license validation, redirect to dashboard
-    // User data and token are already stored from handle2FASuccess
+    console.log('License validation successful, redirecting to launchpad selection')
     if (user) {
-      setCurrentView('welcome')
+      setCurrentView('launchpad')
       setError(null)
     } else {
-      // If no user in state, redirect back to signin
       setCurrentView('signin')
       setError('Session expired. Please sign in again.')
     }
+  }
+
+  const handleLaunchpadGetIn = (launchpad: LaunchpadConfig | null) => {
+    setSelectedLaunchpad(launchpad)
+    setCurrentView('welcome')
+    setError(null)
   }
 
   const handleError = (errorMessage: string) => {
@@ -87,16 +93,12 @@ function App() {
   }
 
   const handleLogout = () => {
-    // Remove auth token and user data from localStorage
     localStorage.removeItem('authToken')
     localStorage.removeItem('userData')
-    // Clear user state
     setUser(null)
-    // Reset view to signin
+    setSelectedLaunchpad(null)
     setCurrentView('signin')
-    // Clear any errors
     setError(null)
-    // Reset active tab to signin
     setActiveTab('signin')
   }
 
@@ -111,7 +113,7 @@ function App() {
         // Validate that userData has required fields
         if (userData.id && userData.email && userData.firstName && userData.lastName) {
           setUser(userData)
-          setCurrentView('welcome')
+          setCurrentView('launchpad')
           setActiveTab('signin')
           console.log('Session restored from localStorage')
         } else {
@@ -145,8 +147,10 @@ function App() {
       currentView !== 'welcome' && "bg-[#1e1e1e]"
     )}>
       <div className="w-full">
-        {currentView === 'welcome' && user ? (
-          <IDELayout user={user} onLogout={handleLogout}  />
+        {currentView === 'launchpad' && user ? (
+          <LaunchpadSelectPage user={user} onGetIn={handleLaunchpadGetIn} />
+        ) : currentView === 'welcome' && user ? (
+          <IDELayout user={user} onLogout={handleLogout} selectedLaunchpad={selectedLaunchpad} onSwitchLaunchpad={() => setCurrentView('launchpad')} />
         ) : currentView === 'otp' ? (
           <>
             <VerificationCode

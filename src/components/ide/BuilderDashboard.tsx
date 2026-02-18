@@ -326,8 +326,8 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
             Project loaded. Open a file from the sidebar or File menu.
           </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center p-8">
-            <div className="text-center space-y-4 max-w-md">
+          <div className="flex-1 flex items-center justify-center p-8 overflow-auto">
+            <div className="text-center space-y-6 max-w-2xl w-full">
               <div className="text-6xl mb-4">👋</div>
               <h2 className="text-2xl font-semibold text-gray-200">
                 Welcome to Builder, {user.firstName}!
@@ -353,6 +353,7 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
                   Open File
                 </Button>
               </div>
+
               <div className="text-gray-400 text-sm flex flex-col justify-center gap-3">
                <span>Open chat  <span className="text-gray-400 bg-gray-800 px-2 py-1 rounded-md font-bold text-sm">Ctrl + K</span></span>
                <span>Hide Files  <span className="text-gray-400 bg-gray-800 px-2 py-1 rounded-md font-bold text-sm">Ctrl + B</span></span>

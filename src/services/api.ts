@@ -171,3 +171,71 @@ export async function validateLicense(
     throw toError(e)
   }
 }
+
+// ----- Launchpad configs (stored in localStorage) -----
+
+const LAUNCHPAD_STORAGE_KEY = 'builder_launchpad_configs'
+
+export interface LaunchpadConfig {
+  id: string
+  url: string
+  email: string
+}
+
+export interface LaunchpadAddInput {
+  url: string
+  email: string
+  password: string
+}
+
+interface StoredLaunchpadConfig extends LaunchpadConfig {
+  password: string
+}
+
+function getStored(): StoredLaunchpadConfig[] {
+  try {
+    const raw = localStorage.getItem(LAUNCHPAD_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as StoredLaunchpadConfig[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function setStored(configs: StoredLaunchpadConfig[]) {
+  localStorage.setItem(LAUNCHPAD_STORAGE_KEY, JSON.stringify(configs))
+}
+
+export function launchpadList(): Promise<LaunchpadConfig[]> {
+  const list = getStored().map(({ id, url, email }) => ({ id, url, email }))
+  return Promise.resolve(list)
+}
+
+export function launchpadAdd(input: LaunchpadAddInput): Promise<LaunchpadConfig> {
+  const url = input.url.trim()
+  const email = input.email.trim()
+  if (!url || !email) {
+    return Promise.reject(new Error('URL and email are required'))
+  }
+  const id = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `lp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const stored: StoredLaunchpadConfig = { id, url, email, password: input.password }
+  const list = getStored()
+  list.push(stored)
+  setStored(list)
+  return Promise.resolve({ id, url, email })
+}
+
+export function launchpadDelete(id: string): Promise<void> {
+  const list = getStored().filter((c) => c.id !== id)
+  setStored(list)
+  return Promise.resolve()
+}
+
+/** Get full config including password (for "Get in" / use). */
+export function launchpadGet(id: string): LaunchpadConfig & { password: string } | null {
+  const c = getStored().find((x) => x.id === id)
+  return c ? { id: c.id, url: c.url, email: c.email, password: c.password } : null
+}
