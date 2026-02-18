@@ -166,17 +166,24 @@ fn ensure_regere_api_key(env_path: &std::path::Path) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Load .env from project root first (binary often runs from target/debug so CWD has no .env)
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let env_path = root.join(".env");
-    let _ = dotenvy::from_path(&env_path);
+    // Load .env from project root when present (dev or when running from project dir).
+    // When running from a built .app bundle, project root may not exist; skip without failing.
+    if let Some(root) = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
+        let env_path = root.join(".env");
+        if env_path.exists() {
+            let _ = dotenvy::from_path(&env_path);
+            ensure_regere_api_key(&env_path);
+        }
+    }
     let _ = dotenvy::dotenv(); // then CWD so it can override
-    ensure_regere_api_key(&env_path); // fallback if dotenvy didn't set key (e.g. hyphen in name)
 
-    tauri::Builder::default()
+    if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![get_env, open_file, save_file])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    {
+        eprintln!("Tauri application error: {}", e);
+        std::process::exit(1);
+    }
 }

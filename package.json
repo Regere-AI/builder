@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "build:mac": "node -e \"if(process.platform!=='darwin'){console.error('Build for macOS must be run on macOS');process.exit(1)}\" && tauri build",
+    "build:win": "node -e \"if(process.platform!=='win32'){console.error('Build for Windows must be run on Windows');process.exit(1)}\" && tauri build"
   },
   "keywords": ["tauri", "react", "typescript", "vite"],
   "author": "",
