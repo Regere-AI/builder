@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Button } from './ui/button'
-import { Input } from './ui/input'
-import { Label } from './ui/label'
+import { Button } from '../ui/button'
+import { Input } from '../ui/input'
+import { Label } from '../ui/label'
 import { signin, sendOTP } from '@/services/api'
 import { Mail, Lock, Loader2 } from 'lucide-react'
 

@@ -9,7 +9,6 @@ lerna-debug.log*
 
 node_modules
 dist
-dist-electron
 *.local
 
 # Editor directories and files
@@ -31,3 +30,7 @@ dist-electron
 # Build outputs
 out
 build
+
+# Tauri / Rust
+src-tauri/target
+src-tauri/gen
