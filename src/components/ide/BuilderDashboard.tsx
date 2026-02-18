@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Folder } from 'lucide-react'
 import { Button } from '../ui/button'
 import { EditorView } from './EditorView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
+import { openFile as desktopOpenFile, saveFile as desktopSaveFile, isTauri } from '@/desktop'
+import { Menu, Submenu, MenuItem, PredefinedMenuItem } from '@tauri-apps/api/menu'
+import { exit } from '@tauri-apps/plugin-process'
 
 interface BuilderDashboardProps {
   user: {
@@ -24,27 +27,20 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
   }
 
   const handleOpenFile = async () => {
-    const electronAPI = window.electronAPI as any
-    if (!electronAPI?.openFile) {
-      console.error('Electron API not available')
+    if (!isTauri()) {
+      console.error('Desktop API not available')
       return
     }
-
     try {
-      const result = await electronAPI.openFile()
-      
+      const result = await desktopOpenFile()
       if (result.canceled || !result.success || !result.filePath || !result.content) {
         return
       }
-
-      // Check if file is already open
       const existingFile = openFiles.find((f) => f.path === result.filePath)
       if (existingFile) {
         setActiveFile(existingFile)
         return
       }
-
-      // Add new file
       const fileName = result.filePath.split(/[\\/]/).pop() || result.filePath
       const newFile: EditorFile = {
         path: result.filePath,
@@ -52,7 +48,6 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
         content: result.content,
         isModified: false,
       }
-
       setOpenFiles((prev) => [...prev, newFile])
       setActiveFile(newFile)
     } catch (error) {
@@ -114,21 +109,12 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
 
   const handleSave = async () => {
     if (!activeFile) return
-    
-    const electronAPI = window.electronAPI as any
-    if (!electronAPI?.saveFile) return
-
+    if (!isTauri()) return
     try {
-      const result = await electronAPI.saveFile(
-        activeFile.content,
-        activeFile.path
-      )
-
+      const result = await desktopSaveFile(activeFile.content, activeFile.path)
       if (result.success && result.filePath) {
-        // Update file path if it changed (e.g., new file saved with name)
         const updatedPath = result.filePath
         const updatedName = updatedPath.split(/[\\/]/).pop() || updatedPath
-
         setOpenFiles((prev) =>
           prev.map((f) =>
             f.path === activeFile.path
@@ -147,39 +133,134 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
     }
   }
 
-  // Handle menu events (File → New, File → Open, File → Save)
-  useEffect(() => {
-    const electronAPI = window.electronAPI as any
-    if (!electronAPI) return
-
-    // Handle File → New menu
-    if (electronAPI.onMenuNewFile) {
-      electronAPI.onMenuNewFile(() => {
-        handleNewFile()
-      })
-    }
-
-    // Handle File → Open menu
-    if (electronAPI.onMenuOpenRequested) {
-      electronAPI.onMenuOpenRequested(() => {
-        handleOpenFile()
-      })
-    }
-
-    // Handle File → Save menu
-    if (electronAPI.onMenuSaveRequested) {
-      electronAPI.onMenuSaveRequested(() => {
-        handleSave()
-      })
-    }
-
-    // Cleanup on unmount
-    return () => {
-      if (electronAPI?.removeMenuListeners) {
-        electronAPI.removeMenuListeners()
+  const handleSaveAs = async () => {
+    if (!activeFile) return
+    if (!isTauri()) return
+    try {
+      const result = await desktopSaveFile(activeFile.content)
+      if (result.success && result.filePath) {
+        const updatedPath = result.filePath
+        const updatedName = updatedPath.split(/[\\/]/).pop() || updatedPath
+        setOpenFiles((prev) =>
+          prev.map((f) =>
+            f.path === activeFile.path
+              ? { ...f, path: updatedPath, name: updatedName, isModified: false }
+              : f
+          )
+        )
+        setActiveFile((prev) =>
+          prev
+            ? { ...prev, path: updatedPath, name: updatedName, isModified: false }
+            : null
+        )
       }
+    } catch (error) {
+      console.error('Failed to save file:', error)
     }
-  }, [activeFile, openFiles])
+  }
+
+  const handlersRef = useRef({ handleNewFile, handleOpenFile, handleSave, handleSaveAs })
+  handlersRef.current = { handleNewFile, handleOpenFile, handleSave, handleSaveAs }
+
+  // Build Tauri app menu (File, Edit, View, Window, Help)
+  useEffect(() => {
+    if (!isTauri()) return
+    let mounted = true
+    const setupMenu = async () => {
+      const isMac = navigator.platform.toLowerCase().includes('mac')
+
+      const newItem = await MenuItem.new({
+        id: 'new',
+        text: 'New',
+        accelerator: 'CmdOrCtrl+N',
+        action: () => handlersRef.current.handleNewFile(),
+      })
+      const openItem = await MenuItem.new({
+        id: 'open',
+        text: 'Open',
+        accelerator: 'CmdOrCtrl+O',
+        action: () => handlersRef.current.handleOpenFile(),
+      })
+      const saveItem = await MenuItem.new({
+        id: 'save',
+        text: 'Save',
+        accelerator: 'CmdOrCtrl+S',
+        action: () => handlersRef.current.handleSave(),
+      })
+      const saveAsItem = await MenuItem.new({
+        id: 'save-as',
+        text: 'Save As...',
+        accelerator: 'CmdOrCtrl+Shift+S',
+        action: () => handlersRef.current.handleSaveAs(),
+      })
+      const separator = await PredefinedMenuItem.new({ item: 'Separator' })
+      const quitItem = await MenuItem.new({
+        id: 'quit',
+        text: isMac ? 'Quit' : 'Exit',
+        accelerator: isMac ? 'Cmd+Q' : 'Ctrl+Q',
+        action: () => exit(0),
+      })
+
+      const fileSubmenu = await Submenu.new({
+        text: 'File',
+        items: [newItem, openItem, separator, saveItem, saveAsItem, separator, quitItem],
+      })
+
+      const undoItem = await PredefinedMenuItem.new({ item: 'Undo' })
+      const redoItem = await PredefinedMenuItem.new({ item: 'Redo' })
+      const editSep1 = await PredefinedMenuItem.new({ item: 'Separator' })
+      const cutItem = await PredefinedMenuItem.new({ item: 'Cut' })
+      const copyItem = await PredefinedMenuItem.new({ item: 'Copy' })
+      const pasteItem = await PredefinedMenuItem.new({ item: 'Paste' })
+      const selectAllItem = await PredefinedMenuItem.new({ item: 'SelectAll' })
+      const editSep2 = await PredefinedMenuItem.new({ item: 'Separator' })
+      const deleteItem = await PredefinedMenuItem.new({ item: 'Delete' })
+      const editSubmenu = await Submenu.new({
+        text: 'Edit',
+        items: [undoItem, redoItem, editSep1, cutItem, copyItem, pasteItem, selectAllItem, editSep2, deleteItem],
+      })
+
+      const reloadItem = await PredefinedMenuItem.new({ item: 'Reload' })
+      const devToolsItem = await PredefinedMenuItem.new({ item: 'ToggleDevTools' })
+      const sep3 = await PredefinedMenuItem.new({ item: 'Separator' })
+      const zoomInItem = await PredefinedMenuItem.new({ item: 'ZoomIn' })
+      const zoomOutItem = await PredefinedMenuItem.new({ item: 'ZoomOut' })
+      const resetZoomItem = await PredefinedMenuItem.new({ item: 'ResetZoom' })
+      const fullscreenItem = await PredefinedMenuItem.new({ item: 'ToggleFullscreen' })
+      const viewSubmenu = await Submenu.new({
+        text: 'View',
+        items: [reloadItem, devToolsItem, sep3, resetZoomItem, zoomInItem, zoomOutItem, sep3, fullscreenItem],
+      })
+
+      const minimizeItem = await PredefinedMenuItem.new({ item: 'Minimize' })
+      const closeItem = await PredefinedMenuItem.new({ item: 'Close' })
+      const windowSubmenu = await Submenu.new({
+        text: 'Window',
+        items: [minimizeItem, closeItem],
+      })
+
+      const aboutItem = await MenuItem.new({
+        id: 'about',
+        text: 'About',
+        action: () => {
+          // Could use @tauri-apps/plugin-dialog message() here
+          console.log('Builder 1.0.0')
+        },
+      })
+      const helpSubmenu = await Submenu.new({
+        text: 'Help',
+        items: [aboutItem],
+      })
+
+      const items = isMac ? [fileSubmenu, editSubmenu, viewSubmenu, windowSubmenu, helpSubmenu] : [fileSubmenu, editSubmenu, viewSubmenu, windowSubmenu, helpSubmenu]
+      const menu = await Menu.new({ items })
+      if (mounted) await menu.setAsAppMenu()
+    }
+    setupMenu()
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   // Handle agent responses - open files from agent
   useEffect(() => {

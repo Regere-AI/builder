@@ -1,35 +1,19 @@
 import axios from 'axios'
-
-// Extend Window interface for Electron API
-declare global {
-  interface Window {
-    electronAPI?: {
-      platform?: string
-      versions?: {
-        node: string
-        chrome: string
-        electron: string
-      }
-      getEnv: (key: string) => Promise<string | null>
-    }
-  }
-}
+import { getEnv } from '@/desktop'
 
 // Default API base URL
 const DEFAULT_API_BASE_URL = 'http://localhost:3010'
 
 // Get API base URL from environment or use default
 async function getApiBaseUrl(): Promise<string> {
-  if (window.electronAPI?.getEnv) {
-    try {
-      const baseUrl = await window.electronAPI.getEnv('STACK_GUARD_API_BASE_URL')
-      if (baseUrl) {
-        console.log('Using API base URL from environment:', baseUrl)
-        return baseUrl
-      }
-    } catch (error) {
-      console.warn('Could not get STACK_GUARD_API_BASE_URL from environment, using default:', error)
+  try {
+    const baseUrl = await getEnv('STACK_GUARD_API_BASE_URL')
+    if (baseUrl) {
+      console.log('Using API base URL from environment:', baseUrl)
+      return baseUrl
     }
+  } catch (error) {
+    console.warn('Could not get STACK_GUARD_API_BASE_URL from environment, using default:', error)
   }
   console.log('Using default API base URL:', DEFAULT_API_BASE_URL)
   return DEFAULT_API_BASE_URL
@@ -142,16 +126,13 @@ export interface ValidateLicenseResponse {
   message: string
 }
 
-// Get API key from environment
+// Get API key from environment (must match .env: REGERE-API-KEY)
 async function getApiKey(): Promise<string> {
-  if (window.electronAPI?.getEnv) {
-    const apiKey = await window.electronAPI.getEnv('REGERE-API-KEY')
-    if (!apiKey) {
-      throw new Error('REGERE-API-KEY not found in environment variables')
-    }
-    return apiKey
+  const apiKey = await getEnv('REGERE-API-KEY')
+  if (!apiKey) {
+    throw new Error('REGERE-API-KEY not found in environment variables')
   }
-  throw new Error('Electron API not available')
+  return apiKey
 }
 
 // Create axios instance factory that gets base URL dynamically

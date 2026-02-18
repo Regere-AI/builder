@@ -1,13 +1,32 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { resolve } from 'path'
+import { createRequire } from 'module'
 
-// https://vitejs.dev/config/
+const require = createRequire(import.meta.url)
+const monacoEditorPlugin =
+  require('vite-plugin-monaco-editor').default ?? require('vite-plugin-monaco-editor')
+
 export default defineConfig({
-  plugins: [react()],
+  root: 'src',
+  plugins: [react(), monacoEditorPlugin({})],
   server: {
+    port: 5173,
+    strictPort: true,
     fs: {
-      // Allow serving files from node_modules for Monaco Editor
-      allow: ['..']
-    }
-  }
+      allow: ['..'],
+    },
+  },
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src'),
+    },
+  },
+  build: {
+    outDir: '../dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      input: resolve(__dirname, 'src/index.html'),
+    },
+  },
 })

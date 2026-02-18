@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './styles.css'
 
-// Suppress Monaco Editor dragEvent errors (known issue in Electron)
+// Suppress Monaco Editor dragEvent errors in webview
 if (typeof window !== 'undefined') {
   window.addEventListener('error', (event) => {
     if (event.message?.includes('dragEvent') || event.message?.includes('ReferenceError: dragEvent')) {

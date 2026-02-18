@@ -7,36 +7,6 @@ import { IDELayout } from './components/ide/IDELayout'
 import { cn } from './lib/utils'
 import { Mail, Lock } from 'lucide-react'
 
-// Extend Window interface to include our custom APIs
-declare global {
-  interface Window {
-    electronAPI?: {
-      platform?: string
-      versions?: {
-        node: string
-        chrome: string
-        electron: string
-      }
-      getEnv: (key: string) => Promise<string | null>
-      // File operations
-      saveFile: (content: string, defaultPath?: string) => Promise<{ success: boolean; filePath?: string; error?: string; canceled?: boolean }>
-      openFile: () => Promise<{ success: boolean; filePath?: string; content?: string; error?: string; canceled?: boolean }>
-      // Menu event listeners
-      onMenuNewFile: (callback: () => void) => void
-      onMenuOpenRequested: (callback: () => void) => void
-      onMenuSaveRequested: (callback: () => void) => void
-      onMenuSaveAsRequested: (callback: () => void) => void
-      removeMenuListeners: () => void
-    }
-    ipcRenderer?: {
-      on: (channel: string, listener: (event: any, ...args: any[]) => void) => void
-      off: (channel: string, listener: (event: any, ...args: any[]) => void) => void
-      send: (channel: string, ...args: any[]) => void
-      invoke: (channel: string, ...args: any[]) => Promise<any>
-    }
-  }
-}
-
 type View = 'signup' | 'signin' | 'otp' | '2fa' | 'license' | 'welcome'
 
 interface User {
