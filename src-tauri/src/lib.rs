@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod api;
+
 use serde::Serialize;
 use std::fs;
 use tauri_plugin_dialog::DialogExt;
@@ -144,22 +146,32 @@ async fn save_file(
     }
 }
 
-/// Fallback: some .env parsers skip keys with hyphens; set REGERE-API-KEY from file if missing.
-fn ensure_regere_api_key(env_path: &std::path::Path) {
-    if std::env::var("REGERE-API-KEY").is_ok() {
-        return;
-    }
+/// Fallback: .env keys with hyphens (e.g. REGERE-API-KEY, STACK_GUARD_API_BASE_URL) may not
+/// be loaded by dotenvy; read them manually from the file if missing.
+fn ensure_env_from_file(env_path: &std::path::Path) {
     let Ok(content) = fs::read_to_string(env_path) else {
         return;
     };
     for line in content.lines() {
         let line = line.trim();
-        if line.starts_with("REGERE-API-KEY=") && !line.starts_with("REGERE-API-KEY=#") {
-            let value = line.strip_prefix("REGERE-API-KEY=").unwrap_or("").trim().trim_matches('"');
-            if !value.is_empty() {
-                std::env::set_var("REGERE-API-KEY", value);
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            let key = key.trim();
+            let value = value.trim().trim_matches('"').to_string();
+            if value.is_empty() {
+                continue;
             }
-            break;
+            match key {
+                "REGERE-API-KEY" if std::env::var("REGERE-API-KEY").is_err() => {
+                    std::env::set_var("REGERE-API-KEY", value);
+                }
+                "STACK_GUARD_API_BASE_URL" if std::env::var("STACK_GUARD_API_BASE_URL").is_err() => {
+                    std::env::set_var("STACK_GUARD_API_BASE_URL", value);
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -172,15 +184,32 @@ pub fn run() {
         let env_path = root.join(".env");
         if env_path.exists() {
             let _ = dotenvy::from_path(&env_path);
-            ensure_regere_api_key(&env_path);
+            ensure_env_from_file(&env_path);
         }
     }
     let _ = dotenvy::dotenv(); // then CWD so it can override
+    // Ensure hyphenated keys are set from project root .env if still missing
+    if let Some(root) = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
+        let env_path = root.join(".env");
+        if env_path.exists() {
+            ensure_env_from_file(&env_path);
+        }
+    }
 
     if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![get_env, open_file, save_file])
+        .invoke_handler(tauri::generate_handler![
+            get_env,
+            open_file,
+            save_file,
+            api::api_signup,
+            api::api_send_otp,
+            api::api_verify_otp,
+            api::api_signin,
+            api::api_verify_2fa,
+            api::api_validate_license,
+        ])
         .run(tauri::generate_context!())
     {
         eprintln!("Tauri application error: {}", e);
