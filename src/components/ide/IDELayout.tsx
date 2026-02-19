@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { LeftSidebar } from './LeftSidebar'
 import { BuilderDashboard } from './BuilderDashboard'
-import { ChatPanel } from './ChatPanel'
+import { ChatPanel, type AgentResponsePayload } from './ChatPanel'
 import { StatusBar } from './StatusBar'
 import type { LaunchpadConfig } from '@/services/api'
 
@@ -13,17 +13,17 @@ interface User {
 
 interface IDELayoutProps {
   user: User
-  agentResponse?: any
   activeProject?: any
   selectedLaunchpad?: LaunchpadConfig | null
   onLogout: () => void
   onSwitchLaunchpad: () => void
 }
 
-export function IDELayout({ user, onLogout, agentResponse, activeProject, selectedLaunchpad, onSwitchLaunchpad }: IDELayoutProps) {
+export function IDELayout({ user, onLogout, activeProject, selectedLaunchpad, onSwitchLaunchpad }: IDELayoutProps) {
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
   const [chatPanelWidth, setChatPanelWidth] = useState(320)
+  const [agentResponse, setAgentResponse] = useState<AgentResponsePayload | undefined>(undefined)
 
   // Keyboard shortcut handler for chat panel (Ctrl+L / Cmd+L)
   useEffect(() => {
@@ -68,6 +68,7 @@ export function IDELayout({ user, onLogout, agentResponse, activeProject, select
           onClose={() => setChatPanelOpen(false)}
           width={chatPanelWidth}
           onWidthChange={setChatPanelWidth}
+          onAgentResponse={setAgentResponse}
         />
       </div>
 

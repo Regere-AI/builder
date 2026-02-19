@@ -5,6 +5,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_API_BASE_URL: &str = "http://localhost:3010";
+const DEFAULT_AGENT_URL: &str = "http://localhost:3000";
 
 fn api_base_url() -> String {
     std::env::var("STACK_GUARD_API_BASE_URL").unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_string())
@@ -12,6 +13,10 @@ fn api_base_url() -> String {
 
 fn api_key() -> Result<String, String> {
     std::env::var("REGERE-API-KEY").map_err(|_| "REGERE-API-KEY not found in environment variables".to_string())
+}
+
+fn agent_url() -> String {
+    std::env::var("AGENT_URL").unwrap_or_else(|_| DEFAULT_AGENT_URL.to_string())
 }
 
 // ---------- Signup ----------
@@ -425,4 +430,128 @@ pub async fn api_validate_license(data: ValidateLicenseRequest) -> Result<Valida
         return Err(extract_error_message(&text, "License validation failed"));
     }
     res.json().await.map_err(|e| map_reqwest_error(e, "License validation failed"))
+}
+
+// ---------- Agent Generate ----------
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateRequest {
+    pub prompt: String,
+    pub stream: bool,
+    pub mode: String,
+    pub include_steps: bool,
+}
+
+/// Flexible response: API may return result, content, or data.content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerateResponse {
+    #[serde(default)]
+    pub result: Option<String>,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub code: Option<String>,
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
+}
+
+impl GenerateResponse {
+    /// First non-empty text field for display/editor.
+    pub fn text(&self) -> String {
+        self.result
+            .as_deref()
+            .or(self.content.as_deref())
+            .or(self.code.as_deref())
+            .unwrap_or("")
+            .to_string()
+    }
+}
+
+#[tauri::command]
+pub async fn api_generate(
+    prompt: String,
+    stream: bool,
+    mode: String,
+    include_steps: bool,
+) -> Result<GenerateResponse, String> {
+    if prompt.trim().is_empty() {
+        return Err("Prompt is required".into());
+    }
+    // Only non-streaming for now
+    if stream {
+        return Err("Streaming not implemented yet".into());
+    }
+    let base = agent_url();
+    let url = format!("{}/api/generate", base);
+    let body = serde_json::json!({
+        "prompt": prompt.trim(),
+        "stream": false,
+        "mode": mode.as_str(),
+        "includeSteps": false
+    });
+    let client = Client::new();
+    let res = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| map_reqwest_error(e, "Generate failed"))?;
+    let status = res.status();
+    if !status.is_success() {
+        let text = res.text().await.unwrap_or_default();
+        eprintln!("[api_generate] {} response body: {}", status, text);
+        return Err(extract_error_message(&text, "Generate failed"));
+    }
+    let parsed: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "Generate failed"))?;
+
+    #[cfg(debug_assertions)]
+    eprintln!("[api_generate] raw response: {}", serde_json::to_string(&parsed).unwrap_or_default());
+
+    // Helper: get first non-empty string from a value using common keys (order matters).
+    fn extract_text(v: &serde_json::Value) -> Option<String> {
+        let keys = ["result", "content", "code", "output", "response", "text", "message", "body"];
+        for key in keys {
+            if let Some(s) = v.get(key).and_then(|x| x.as_str()) {
+                if !s.trim().is_empty() {
+                    return Some(s.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    let data = parsed.get("data").cloned();
+    let result = extract_text(&parsed);
+    let (result, content, code) = if let Some(ref s) = result {
+        (Some(s.clone()), None, None)
+    } else if let Some(ref d) = data {
+        let from_data = if let Some(s) = d.as_str() {
+            if s.trim().is_empty() { None } else { Some(s.to_string()) }
+        } else {
+            extract_text(d)
+        };
+        (from_data.clone(), from_data.clone(), from_data)
+    } else {
+        (None, None, None)
+    };
+
+    // If no string field found, use the whole response body (e.g. JSON tree with type/props/children)
+    let (result, content, code) = if result.is_some() || content.is_some() || code.is_some() {
+        (result, content, code)
+    } else if let Ok(full) = serde_json::to_string_pretty(&parsed) {
+        (Some(full.clone()), Some(full.clone()), Some(full))
+    } else {
+        (result, content, code)
+    };
+
+    Ok(GenerateResponse {
+        result,
+        content,
+        code,
+        data,
+    })
 }

@@ -171,6 +171,9 @@ fn ensure_env_from_file(env_path: &std::path::Path) {
                 "STACK_GUARD_API_BASE_URL" if std::env::var("STACK_GUARD_API_BASE_URL").is_err() => {
                     std::env::set_var("STACK_GUARD_API_BASE_URL", value);
                 }
+                "AGENT_URL" if std::env::var("AGENT_URL").is_err() => {
+                    std::env::set_var("AGENT_URL", value);
+                }
                 _ => {}
             }
         }
@@ -270,6 +273,7 @@ pub fn run() {
             api::api_signin,
             api::api_verify_2fa,
             api::api_validate_license,
+            api::api_generate,
         ])
         .run(tauri::generate_context!())
     {

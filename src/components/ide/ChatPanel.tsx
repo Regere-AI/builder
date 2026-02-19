@@ -3,6 +3,7 @@ import { X, MessageSquare, Send, GripVertical } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Select } from '../ui/select'
 import { cn } from '@/lib/utils'
+import { generate, getGenerateResponseText, isTauri } from '@/desktop'
 
 interface Message {
   id: string
@@ -11,23 +12,30 @@ interface Message {
   timestamp: Date
 }
 
+export interface AgentResponsePayload {
+  type: 'code'
+  content: { code: string; filePath?: string }
+}
+
 interface ChatPanelProps {
   isOpen: boolean
   onClose: () => void
   width?: number
   onWidthChange?: (width: number) => void
+  onAgentResponse?: (data: AgentResponsePayload) => void
 }
 
 const MIN_WIDTH = 300
 const MAX_WIDTH = 800
 const DEFAULT_WIDTH = 320
 
-export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelProps) {
+export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentResponse }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [agentMode, setAgentMode] = useState<'Agent' | 'Plan'>('Agent')
   const [panelWidth, setPanelWidth] = useState(width || DEFAULT_WIDTH)
   const [isResizing, setIsResizing] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const resizeRef = useRef<HTMLDivElement>(null)
@@ -110,7 +118,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelPr
     }
   }, [isResizing, onWidthChange])
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!inputValue.trim()) return
 
     const userMessage: Message = {
@@ -121,19 +129,57 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelPr
     }
 
     setMessages((prev) => [...prev, userMessage])
+    const prompt = inputValue.trim()
     setInputValue('')
 
-    // TODO: Add actual chat functionality here
-    // For now, just echo back a placeholder response
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: 'This is a placeholder response. Chat functionality will be implemented later.',
-        role: 'assistant',
-        timestamp: new Date(),
+    const assistantId = (Date.now() + 1).toString()
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, content: '', role: 'assistant', timestamp: new Date() },
+    ])
+    setIsLoading(true)
+
+    if (isTauri()) {
+      try {
+        const response = await generate(prompt, {
+          stream: false,
+          mode: 'generator',
+          includeSteps: false,
+        })
+        const text = getGenerateResponseText(response)
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: text || '(No content)' } : m
+          )
+        )
+        if (text) {
+          const trimmed = text.trim()
+          const isJson = trimmed.startsWith('{') || trimmed.startsWith('[')
+          onAgentResponse?.({
+            type: 'code',
+            content: { code: text, filePath: isJson ? 'Generated.json' : 'Generated.tsx' },
+          })
+        }
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err)
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: `Error: ${errorMessage}` } : m
+          )
+        )
+      } finally {
+        setIsLoading(false)
       }
-      setMessages((prev) => [...prev, assistantMessage])
-    }, 500)
+    } else {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? { ...m, content: 'Chat requires the desktop app (Tauri). Run: npm run tauri dev' }
+            : m
+        )
+      )
+      setIsLoading(false)
+    }
   }
 
 
@@ -203,7 +249,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelPr
                     : 'bg-[#2d2d2d] text-gray-300 border border-[#3e3e3e]'
                 )}
               >
-                {message.content}
+                {message.content || (message.role === 'assistant' && isLoading ? '…' : '')}
               </div>
               <span className="text-xs text-gray-600">
                 {message.timestamp.toLocaleTimeString([], {
@@ -256,7 +302,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelPr
             {/* Send Button */}
             <Button
               onClick={handleSend}
-              disabled={!inputValue.trim()}
+              disabled={!inputValue.trim() || isLoading}
               className="text-white px-4 bg-[#2d2d2d]"
               size="default"
             >

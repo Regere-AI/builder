@@ -35,3 +35,49 @@ export async function saveFile(
 ): Promise<SaveFileResult> {
   return invoke<SaveFileResult>('save_file', { content, defaultPath })
 }
+
+export interface GenerateOptions {
+  stream?: boolean
+  mode?: string
+  includeSteps?: boolean
+}
+
+export interface GenerateResponse {
+  result?: string
+  content?: string
+  code?: string
+  data?: unknown
+}
+
+const TEXT_KEYS = ['result', 'content', 'code', 'output', 'response', 'text', 'message', 'body'] as const
+
+function getTextFromValue(v: unknown): string {
+  if (typeof v === 'string' && v.trim()) return v
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    const o = v as Record<string, unknown>
+    for (const key of TEXT_KEYS) {
+      const val = o[key]
+      if (typeof val === 'string' && val.trim()) return val
+    }
+  }
+  return ''
+}
+
+/** Get first non-empty text from generate response. */
+export function getGenerateResponseText(r: GenerateResponse): string {
+  const top = getTextFromValue(r) || (r.result ?? r.content ?? r.code ?? '')
+  if (top) return top
+  return getTextFromValue(r.data) ?? ''
+}
+
+export async function generate(
+  prompt: string,
+  options?: GenerateOptions
+): Promise<GenerateResponse> {
+  return invoke<GenerateResponse>('api_generate', {
+    prompt: prompt.trim(),
+    stream: options?.stream ?? false,
+    mode: options?.mode ?? 'generator',
+    includeSteps: options?.includeSteps ?? false,
+  })
+}
