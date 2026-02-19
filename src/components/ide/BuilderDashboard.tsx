@@ -5,6 +5,7 @@ import { EditorView } from './EditorView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
 import { openFile as desktopOpenFile, saveFile as desktopSaveFile, isTauri } from '@/desktop'
 import { Menu, Submenu, MenuItem, PredefinedMenuItem } from '@tauri-apps/api/menu'
+import { listen } from '@tauri-apps/api/event'
 import { exit } from '@tauri-apps/plugin-process'
 
 interface BuilderDashboardProps {
@@ -28,7 +29,8 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
 
   const handleOpenFile = async () => {
     if (!isTauri()) {
-      console.error('Desktop API not available')
+      console.warn('Desktop API not available — run the app with "npm run tauri dev" to use Open File.')
+      window.alert('Open File is only available in the desktop app.\n\nRun: npm run tauri dev')
       return
     }
     try {
@@ -162,7 +164,34 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
   const handlersRef = useRef({ handleNewFile, handleOpenFile, handleSave, handleSaveAs })
   handlersRef.current = { handleNewFile, handleOpenFile, handleSave, handleSaveAs }
 
-  // Build Tauri app menu (File, Edit, View, Window, Help)
+  // Subscribe to global shortcut events from backend (once; cleanup clears so no double-firing)
+  const shortcutUnlistensRef = useRef<Array<() => void>>([])
+  useEffect(() => {
+    if (!isTauri()) return
+    // Clear any previous listeners so we never have duplicates (e.g. from React Strict Mode)
+    shortcutUnlistensRef.current.forEach((fn) => fn())
+    shortcutUnlistensRef.current = []
+    let cancelled = false
+    Promise.all([
+      listen('menu:new-file', () => handlersRef.current.handleNewFile()),
+      listen('menu:open-file', () => handlersRef.current.handleOpenFile()),
+      listen('menu:save', () => handlersRef.current.handleSave()),
+      listen('menu:save-as', () => handlersRef.current.handleSaveAs()),
+    ]).then((unlistenFns) => {
+      if (cancelled) {
+        unlistenFns.forEach((fn) => fn())
+        return
+      }
+      shortcutUnlistensRef.current = unlistenFns
+    })
+    return () => {
+      cancelled = true
+      shortcutUnlistensRef.current.forEach((fn) => fn())
+      shortcutUnlistensRef.current = []
+    }
+  }, [])
+
+  // Build Tauri app menu (File, Edit, View, Window, Help + Selection, Go, Run, Terminal)
   useEffect(() => {
     if (!isTauri()) return
     let mounted = true
@@ -214,26 +243,114 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
       const pasteItem = await PredefinedMenuItem.new({ item: 'Paste' })
       const selectAllItem = await PredefinedMenuItem.new({ item: 'SelectAll' })
       const editSep2 = await PredefinedMenuItem.new({ item: 'Separator' })
-      const deleteItem = await PredefinedMenuItem.new({ item: 'Delete' })
+      const deleteItem = await MenuItem.new({
+        id: 'delete',
+        text: 'Delete',
+        action: () => document.execCommand('delete', false),
+      })
       const editSubmenu = await Submenu.new({
         text: 'Edit',
         items: [undoItem, redoItem, editSep1, cutItem, copyItem, pasteItem, selectAllItem, editSep2, deleteItem],
       })
 
-      const reloadItem = await PredefinedMenuItem.new({ item: 'Reload' })
-      const devToolsItem = await PredefinedMenuItem.new({ item: 'ToggleDevTools' })
+      const selectionSelectAll = await PredefinedMenuItem.new({ item: 'SelectAll' })
+      const selectionSubmenu = await Submenu.new({
+        text: 'Selection',
+        items: [selectionSelectAll],
+      })
+
+      const goToLineItem = await MenuItem.new({
+        id: 'go-to-line',
+        text: 'Go to Line...',
+        accelerator: 'CmdOrCtrl+G',
+        action: () => console.log('Go to Line'),
+      })
+      const goToFileItem = await MenuItem.new({
+        id: 'go-to-file',
+        text: 'Go to File...',
+        accelerator: 'CmdOrCtrl+P',
+        action: () => console.log('Go to File'),
+      })
+      const goSubmenu = await Submenu.new({
+        text: 'Go',
+        items: [goToLineItem, goToFileItem],
+      })
+
+      const runItem = await MenuItem.new({
+        id: 'run',
+        text: 'Run',
+        accelerator: 'F5',
+        action: () => console.log('Run'),
+      })
+      const debugItem = await MenuItem.new({
+        id: 'debug',
+        text: 'Debug',
+        accelerator: 'F10',
+        action: () => console.log('Debug'),
+      })
+      const runSubmenu = await Submenu.new({
+        text: 'Run',
+        items: [runItem, debugItem],
+      })
+
+      const newTerminalItem = await MenuItem.new({
+        id: 'new-terminal',
+        text: 'New Terminal',
+        accelerator: 'Ctrl+`',
+        action: () => console.log('New Terminal'),
+      })
+      const toggleTerminalItem = await MenuItem.new({
+        id: 'toggle-terminal',
+        text: 'Toggle Terminal',
+        accelerator: 'Ctrl+`',
+        action: () => console.log('Toggle Terminal'),
+      })
+      const terminalSubmenu = await Submenu.new({
+        text: 'Terminal',
+        items: [newTerminalItem, toggleTerminalItem],
+      })
+
+      const reloadItem = await MenuItem.new({
+        id: 'reload',
+        text: 'Reload',
+        accelerator: 'CmdOrCtrl+R',
+        action: () => window.location.reload(),
+      })
+      const devToolsItem = await MenuItem.new({
+        id: 'toggle-devtools',
+        text: 'Toggle Developer Tools',
+        action: () => {
+          // Tauri handles this via native menu; custom item for consistency
+          console.log('Toggle DevTools')
+        },
+      })
       const sep3 = await PredefinedMenuItem.new({ item: 'Separator' })
-      const zoomInItem = await PredefinedMenuItem.new({ item: 'ZoomIn' })
-      const zoomOutItem = await PredefinedMenuItem.new({ item: 'ZoomOut' })
-      const resetZoomItem = await PredefinedMenuItem.new({ item: 'ResetZoom' })
-      const fullscreenItem = await PredefinedMenuItem.new({ item: 'ToggleFullscreen' })
+      const zoomInItem = await MenuItem.new({
+        id: 'zoom-in',
+        text: 'Zoom In',
+        accelerator: 'CmdOrCtrl+Plus',
+        action: () => {},
+      })
+      const zoomOutItem = await MenuItem.new({
+        id: 'zoom-out',
+        text: 'Zoom Out',
+        accelerator: 'CmdOrCtrl+-',
+        action: () => {},
+      })
+      const resetZoomItem = await MenuItem.new({
+        id: 'reset-zoom',
+        text: 'Reset Zoom',
+        accelerator: 'CmdOrCtrl+0',
+        action: () => {},
+      })
+      const fullscreenItem = await PredefinedMenuItem.new({ item: 'Fullscreen' })
       const viewSubmenu = await Submenu.new({
         text: 'View',
         items: [reloadItem, devToolsItem, sep3, resetZoomItem, zoomInItem, zoomOutItem, sep3, fullscreenItem],
       })
 
       const minimizeItem = await PredefinedMenuItem.new({ item: 'Minimize' })
-      const closeItem = await PredefinedMenuItem.new({ item: 'Close' })
+      const closeItem = await PredefinedMenuItem.new({ item: 'CloseWindow' })
       const windowSubmenu = await Submenu.new({
         text: 'Window',
         items: [minimizeItem, closeItem],
@@ -252,7 +369,9 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
         items: [aboutItem],
       })
 
-      const items = isMac ? [fileSubmenu, editSubmenu, viewSubmenu, windowSubmenu, helpSubmenu] : [fileSubmenu, editSubmenu, viewSubmenu, windowSubmenu, helpSubmenu]
+      const items = isMac
+        ? [fileSubmenu, editSubmenu, selectionSubmenu, viewSubmenu, goSubmenu, runSubmenu, terminalSubmenu, windowSubmenu, helpSubmenu]
+        : [fileSubmenu, editSubmenu, selectionSubmenu, viewSubmenu, goSubmenu, runSubmenu, terminalSubmenu, windowSubmenu, helpSubmenu]
       const menu = await Menu.new({ items })
       if (mounted) await menu.setAsAppMenu()
     }

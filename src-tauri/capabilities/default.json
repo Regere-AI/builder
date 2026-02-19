@@ -11,6 +11,9 @@
     "core:menu:default",
     "core:tray:default",
     "core:webview:allow-internal-toggle-devtools",
-    "process:default"
+    "process:default",
+    "fs:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister"
   ]
 }

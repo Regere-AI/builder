@@ -4,6 +4,7 @@ mod api;
 
 use serde::Serialize;
 use std::fs;
+use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 
 #[derive(Debug, Serialize)]
@@ -198,7 +199,67 @@ pub fn run() {
 
     if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+            {
+                use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+                let handle = app.handle().clone();
+                // On Windows/Linux use Ctrl; on macOS use Cmd (META). Avoid registering both
+                // so we don't conflict with the native menu's CmdOrCtrl (e.g. SUPER+N on Windows).
+                #[cfg(target_os = "macos")]
+                let (mod_n, mod_o, mod_s, mod_shift_s) = (
+                    Shortcut::new(Some(Modifiers::META), Code::KeyN),
+                    Shortcut::new(Some(Modifiers::META), Code::KeyO),
+                    Shortcut::new(Some(Modifiers::META), Code::KeyS),
+                    Shortcut::new(Some(Modifiers::META | Modifiers::SHIFT), Code::KeyS),
+                );
+                #[cfg(not(target_os = "macos"))]
+                let (mod_n, mod_o, mod_s, mod_shift_s) = (
+                    Shortcut::new(Some(Modifiers::CONTROL), Code::KeyN),
+                    Shortcut::new(Some(Modifiers::CONTROL), Code::KeyO),
+                    Shortcut::new(Some(Modifiers::CONTROL), Code::KeyS),
+                    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS),
+                );
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_handler(move |_app, shortcut, _event| {
+                            let event_name: Option<&str> = if shortcut == &mod_n {
+                                Some("menu:new-file")
+                            } else if shortcut == &mod_o {
+                                Some("menu:open-file")
+                            } else if shortcut == &mod_s {
+                                Some("menu:save")
+                            } else if shortcut == &mod_shift_s {
+                                Some("menu:save-as")
+                            } else {
+                                None
+                            };
+                            if let Some(name) = event_name {
+                                let _ = handle.emit(name, ());
+                            }
+                        })
+                        .build(),
+                )?;
+                let gs = app.global_shortcut();
+                #[cfg(target_os = "macos")]
+                {
+                    gs.register(Shortcut::new(Some(Modifiers::META), Code::KeyN))?;
+                    gs.register(Shortcut::new(Some(Modifiers::META), Code::KeyO))?;
+                    gs.register(Shortcut::new(Some(Modifiers::META), Code::KeyS))?;
+                    gs.register(Shortcut::new(Some(Modifiers::META | Modifiers::SHIFT), Code::KeyS))?;
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    gs.register(Shortcut::new(Some(Modifiers::CONTROL), Code::KeyN))?;
+                    gs.register(Shortcut::new(Some(Modifiers::CONTROL), Code::KeyO))?;
+                    gs.register(Shortcut::new(Some(Modifiers::CONTROL), Code::KeyS))?;
+                    gs.register(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS))?;
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_env,
             open_file,

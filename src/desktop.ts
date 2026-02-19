@@ -16,7 +16,9 @@ export interface SaveFileResult {
 }
 
 export function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI__' in window
+  if (typeof window === 'undefined') return false
+  // Tauri 2: __TAURI__ when withGlobalTauri is enabled; else __TAURI_INTERNALS__ is used by the API
+  return '__TAURI__' in window || '__TAURI_INTERNALS__' in window
 }
 
 export async function getEnv(key: string): Promise<string | null> {
