@@ -157,7 +157,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
           const isJson = trimmed.startsWith('{') || trimmed.startsWith('[')
           onAgentResponse?.({
             type: 'code',
-            content: { code: text, filePath: isJson ? 'Generated.json' : 'Generated.tsx' },
+            content: { code: text, filePath: isJson ? 'uiConfigs/generated.json' : 'uiConfigs/generated.tsx' },
           })
         }
       } catch (err) {

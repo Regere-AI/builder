@@ -1,51 +1,736 @@
-import { useState } from 'react'
-import { Folder, RefreshCw, Network, ChevronRight } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search } from 'lucide-react'
+import { Tree } from 'react-arborist'
+import type { NodeRendererProps } from 'react-arborist'
+import type { TreeApi } from 'react-arborist'
+import * as ContextMenu from '@radix-ui/react-context-menu'
 import { cn } from '@/lib/utils'
+import {
+  appReadDir,
+  appReadTextFile,
+  appWriteTextFile,
+  appCreateDir,
+  appRename,
+  appMove,
+  appDelete,
+} from '@/desktop'
+import type { ActiveApp } from './IDELayout'
+
+function pathJoin(...parts: string[]): string {
+  return parts
+    .filter(Boolean)
+    .join('/')
+    .replace(/\\/g, '/')
+}
+
+function pathDirname(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  const idx = normalized.lastIndexOf('/')
+  return idx <= 0 ? normalized : normalized.slice(0, idx)
+}
+
+function findNode(nodes: TreeNode[], path: string): TreeNode | null {
+  for (const node of nodes) {
+    if (node.path === path) return node
+    if (node.children) {
+      const found = findNode(node.children, path)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+const PENDING_FILE = '__pending_file__'
+const PENDING_FOLDER = '__pending_folder__'
+
+function injectPendingNode(
+  nodes: TreeNode[],
+  parentPath: string,
+  rootPath: string,
+  pendingNode: TreeNode
+): TreeNode[] {
+  if (parentPath === rootPath) {
+    return [...nodes, pendingNode]
+  }
+  return nodes.map((node) => {
+    if (node.path === parentPath) {
+      const children = [...(node.children || []), pendingNode]
+      children.sort((a, b) =>
+        a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1
+      )
+      return { ...node, children }
+    }
+    if (node.children) {
+      return {
+        ...node,
+        children: injectPendingNode(node.children, parentPath, rootPath, pendingNode),
+      }
+    }
+    return node
+  })
+}
+
+interface SidebarNodeProps extends NodeRendererProps<TreeNode> {
+  selectedPath: string | null
+  onSelectPath: (path: string) => void
+  isPendingNode?: boolean
+  pendingNewItem?: { type: 'file' | 'folder'; parentPath: string } | null
+  pendingNewItemName?: string
+  pendingInputRef?: React.RefObject<HTMLInputElement>
+  onPendingKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
+  onPendingBlur?: () => void
+  onPendingChange?: (value: string) => void
+  onDeleteNodes?: (ids: string[]) => void
+  onNewFile?: (parentPath: string) => void
+  onNewFolder?: (parentPath: string) => void
+}
+
+function SidebarNode({
+  node,
+  style,
+  dragHandle,
+  selectedPath,
+  onSelectPath,
+  isPendingNode,
+  pendingNewItem,
+  pendingNewItemName = '',
+  pendingInputRef,
+  onPendingKeyDown,
+  onPendingBlur,
+  onPendingChange,
+  onDeleteNodes,
+  onNewFile,
+  onNewFolder,
+}: SidebarNodeProps) {
+  const data = node.data
+  const isSelected = data.path === selectedPath
+  const parentPathForNew = data.isDir ? data.path : pathDirname(data.path)
+
+  if (isPendingNode && pendingNewItem) {
+    const isFile = pendingNewItem.type === 'file'
+    return (
+      <div
+        style={style}
+        className="flex items-center gap-1 py-0.5 px-1 rounded text-sm min-w-0"
+        onKeyDownCapture={(e) => {
+          e.stopPropagation()
+          if (e.key === 'Enter' || e.key === 'Escape') {
+            e.preventDefault()
+            onPendingKeyDown?.(e as unknown as React.KeyboardEvent<HTMLInputElement>)
+          }
+        }}
+      >
+        <span className="w-3.5 shrink-0" />
+        {isFile ? (
+          <FileJson className="w-4 h-4 shrink-0 text-blue-400/90" />
+        ) : (
+          <Folder className="w-4 h-4 shrink-0 text-amber-500/90" />
+        )}
+        <input
+          ref={pendingInputRef}
+          type="text"
+          value={pendingNewItemName}
+          onChange={(e) => onPendingChange?.(e.target.value)}
+          onKeyDown={onPendingKeyDown}
+          onBlur={onPendingBlur}
+          placeholder={isFile ? 'New file name' : 'New folder name'}
+          className="flex-1 min-w-0 bg-[#3c3c3c] border border-[#007acc] rounded px-1 py-0.5 text-gray-200 text-sm outline-none"
+        />
+      </div>
+    )
+  }
+
+  if (node.isEditing) {
+    return (
+      <div
+        style={style}
+        className="flex items-center gap-1 py-0.5 px-1 rounded text-sm min-w-0"
+      >
+        {data.isDir ? (
+          <>
+            <span className="shrink-0 flex items-center justify-center w-3.5">
+              <Folder className="w-4 h-4 shrink-0 text-amber-500/90" />
+            </span>
+            <span className="w-3.5 shrink-0" />
+          </>
+        ) : (
+          <>
+            <span className="w-3.5 shrink-0" />
+            <FileJson className="w-4 h-4 shrink-0 text-blue-400/90" />
+          </>
+        )}
+        <input
+          type="text"
+          defaultValue={data.name}
+          autoFocus
+          className="flex-1 min-w-0 bg-[#3c3c3c] border border-[#007acc] rounded px-1 py-0.5 text-gray-200 text-sm outline-none"
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              const value = (e.currentTarget.value || '').trim()
+              if (value) node.submit(value)
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              node.reset()
+            }
+          }}
+          onBlur={(e) => {
+            const value = (e.currentTarget.value || '').trim()
+            if (value) node.submit(value)
+            else node.reset()
+          }}
+        />
+      </div>
+    )
+  }
+
+  const rowContent = (
+    <div
+      style={style}
+      className={cn(
+        'flex items-center gap-1 py-0.5 px-1 rounded text-left text-sm truncate cursor-pointer',
+        isSelected ? 'bg-[#094771] hover:bg-[#094771]' : 'hover:bg-[#2a2d2e]'
+      )}
+      onClick={(e) => {
+        e.stopPropagation()
+        onSelectPath(data.path)
+        if (data.isDir) {
+          node.toggle()
+        }
+        node.handleClick(e)
+      }}
+    >
+      {!data.isDir ? (
+        <>
+          <span className="w-3.5 shrink-0" />
+          <FileJson className="w-4 h-4 shrink-0 text-blue-400/90" />
+        </>
+      ) : (
+        <>
+          <span
+            className="shrink-0 flex items-center justify-center w-3.5"
+            onClick={(e) => {
+              e.stopPropagation()
+              node.toggle()
+            }}
+          >
+            {node.isOpen ? (
+              <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+            )}
+          </span>
+          {node.isOpen ? (
+            <FolderOpen className="w-4 h-4 shrink-0 text-amber-500/90" />
+          ) : (
+            <Folder className="w-4 h-4 shrink-0 text-amber-500/90" />
+          )}
+        </>
+      )}
+      <span className="truncate">{data.name}</span>
+    </div>
+  )
+
+  return (
+    <div
+      ref={isPendingNode ? undefined : dragHandle}
+      style={style}
+      className="flex items-center min-w-0"
+    >
+      <ContextMenu.Root>
+        <ContextMenu.Trigger asChild>{rowContent}</ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content
+          className="min-w-[160px] rounded-md bg-[#252526] border border-[#3e3e3e] shadow-lg p-1 z-50"
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
+          <ContextMenu.Item
+            className="rounded px-2 py-1.5 text-sm text-gray-200 outline-none cursor-pointer hover:bg-[#094771] focus:bg-[#094771]"
+            onSelect={() => node.edit()}
+          >
+            Rename
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            className="rounded px-2 py-1.5 text-sm text-gray-200 outline-none cursor-pointer hover:bg-[#094771] focus:bg-[#094771]"
+            onSelect={() => {
+              if (navigator.clipboard?.writeText) navigator.clipboard.writeText(data.path)
+            }}
+          >
+            Copy path
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            className="rounded px-2 py-1.5 text-sm text-gray-200 outline-none cursor-pointer hover:bg-[#094771] focus:bg-[#094771]"
+            onSelect={() => {
+              const sel = node.tree.state.nodes.selection
+              const ids = sel.ids.size > 0 ? Array.from(sel.ids) as string[] : [node.id]
+              onDeleteNodes?.(ids)
+            }}
+          >
+            Delete
+          </ContextMenu.Item>
+          <ContextMenu.Separator className="h-px bg-[#3e3e3e] my-1" />
+          <ContextMenu.Item
+            className="rounded px-2 py-1.5 text-sm text-gray-200 outline-none cursor-pointer hover:bg-[#094771] focus:bg-[#094771]"
+            onSelect={() => onNewFile?.(parentPathForNew)}
+          >
+            New File
+          </ContextMenu.Item>
+          <ContextMenu.Item
+            className="rounded px-2 py-1.5 text-sm text-gray-200 outline-none cursor-pointer hover:bg-[#094771] focus:bg-[#094771]"
+            onSelect={() => onNewFolder?.(parentPathForNew)}
+          >
+            New Folder
+          </ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+      </ContextMenu.Root>
+    </div>
+  )
+}
 
 interface LeftSidebarProps {
   expanded: boolean
   onToggle: () => void
-  onOpenProject?: () => void
-  onCloneRepo?: () => void
-  onConnectSSH?: () => void
+  activeApp: ActiveApp | null
+  onOpenApp: (app: ActiveApp | null) => void
+  onCloseApp: () => void
+  onOpenFile?: (path: string, content: string) => void
+  /** Increment to refresh the file tree (e.g. after chat creates a file in the app). */
+  refreshTrigger?: number
 }
 
-export function LeftSidebar({ 
-  expanded, 
-  onToggle, 
-}: LeftSidebarProps) {
-  
-  return (
-    <div className={cn(
-      "bg-[#252526] border-r border-[#3e3e3e] transition-all duration-200 flex flex-col",
-      expanded ? "w-64" : "w-12"
-    )}>
-      {/* Action Buttons */}
-      <div className="p-3 space-y-2 border-b border-[#3e3e3e]">
-        {/*  */}
-      </div>
+interface TreeNode {
+  name: string
+  path: string
+  isDir: boolean
+  children?: TreeNode[]
+}
 
-      {/* Recent Projects Section */}
+export function LeftSidebar({
+  expanded,
+  onToggle,
+  activeApp,
+  onOpenApp: _onOpenApp,
+  onCloseApp: _onCloseApp,
+  onOpenFile,
+  refreshTrigger,
+}: LeftSidebarProps) {
+  const [tree, setTree] = useState<TreeNode[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [pendingNewItem, setPendingNewItem] = useState<{ type: 'file' | 'folder'; parentPath: string } | null>(null)
+  const [pendingNewItemName, setPendingNewItemName] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+  const pendingInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (pendingNewItem) {
+      setPendingNewItemName('')
+      setError(null)
+      const t = setTimeout(() => pendingInputRef.current?.focus(), 0)
+      return () => clearTimeout(t)
+    }
+  }, [pendingNewItem])
+
+  const loadTree = useCallback(async (rootPath: string, options?: { silent?: boolean }) => {
+    const silent = options?.silent === true
+    if (!silent) {
+      setLoading(true)
+      setError(null)
+    }
+    try {
+      const entries = await appReadDir(rootPath)
+      const rootNodes: TreeNode[] = []
+      const uiConfigsPath = pathJoin(rootPath, 'uiConfigs')
+      const workflowsPath = pathJoin(rootPath, 'workflows')
+
+      // Always show app.manifest.json if present
+      const hasManifest = entries.some((e) => !e.isDir && e.name === 'app.manifest.json')
+      if (hasManifest) {
+        rootNodes.push({
+          name: 'app.manifest.json',
+          path: pathJoin(rootPath, 'app.manifest.json'),
+          isDir: false,
+        })
+      }
+
+      // uiConfigs folder (always show)
+      const hasUiConfigs = entries.some((e) => e.isDir && e.name === 'uiConfigs')
+      const uiConfigsChildren: TreeNode[] = []
+      if (hasUiConfigs) {
+        try {
+          const uiEntries = await appReadDir(uiConfigsPath)
+          for (const e of uiEntries) {
+            uiConfigsChildren.push({
+              name: e.name,
+              path: pathJoin(uiConfigsPath, e.name),
+              isDir: e.isDir,
+              ...(e.isDir ? { children: [] as TreeNode[] } : {}),
+            })
+          }
+        } catch {
+          // ignore
+        }
+      }
+      rootNodes.push({
+        name: 'uiConfigs',
+        path: uiConfigsPath,
+        isDir: true,
+        children: uiConfigsChildren.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1)),
+      })
+
+      // workflows folder (always show)
+      const hasWorkflows = entries.some((e) => e.isDir && e.name === 'workflows')
+      const workflowsChildren: TreeNode[] = []
+      if (hasWorkflows) {
+        try {
+          const wfEntries = await appReadDir(workflowsPath)
+          for (const e of wfEntries) {
+            workflowsChildren.push({
+              name: e.name,
+              path: pathJoin(workflowsPath, e.name),
+              isDir: e.isDir,
+              ...(e.isDir ? { children: [] as TreeNode[] } : {}),
+            })
+          }
+        } catch {
+          // ignore
+        }
+      }
+      rootNodes.push({
+        name: 'workflows',
+        path: workflowsPath,
+        isDir: true,
+        children: workflowsChildren.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1)),
+      })
+
+      setTree(rootNodes)
+    } catch (e) {
+      if (!silent) setError(e instanceof Error ? e.message : String(e))
+      if (!silent) setTree([])
+    } finally {
+      if (!silent) setLoading(false)
+    }
+  }, [])
+
+  // Initial load when app is selected (show loading state)
+  useEffect(() => {
+    if (activeApp?.rootPath) {
+      loadTree(activeApp.rootPath)
+    } else {
+      setTree([])
+      setError(null)
+    }
+  }, [activeApp?.rootPath, loadTree])
+
+  // Silent refresh when e.g. chat creates a file (keep tree visible, no loading overlay)
+  useEffect(() => {
+    if (activeApp?.rootPath && refreshTrigger != null && refreshTrigger > 0) {
+      loadTree(activeApp.rootPath, { silent: true })
+    }
+  }, [refreshTrigger, activeApp?.rootPath, loadTree])
+
+  const getCreateTargetParentPath = useCallback((): string => {
+    if (!activeApp) return ''
+    if (!selectedPath) return activeApp.rootPath
+    const node = findNode(tree, selectedPath)
+    if (node?.isDir) return selectedPath
+    return pathDirname(selectedPath)
+  }, [activeApp, selectedPath, tree])
+
+  const handleCreateFile = () => {
+    if (!activeApp) return
+    const parentPath = getCreateTargetParentPath()
+    setPendingNewItem({ type: 'file', parentPath })
+  }
+
+  const handleCreateFolder = () => {
+    if (!activeApp) return
+    const parentPath = getCreateTargetParentPath()
+    setPendingNewItem({ type: 'folder', parentPath })
+  }
+
+  const submitPendingNewItem = useCallback(async () => {
+    const name = pendingNewItemName.trim()
+    const type = pendingTypeRef.current
+    if (!name || !pendingNewItem || !activeApp) return
+    setError(null)
+    const fullPath = pathJoin(pendingNewItem.parentPath, name)
+    try {
+      if (type === 'file') {
+        const initialContent = name.endsWith('.json') ? '{}' : ''
+        await appWriteTextFile(fullPath, initialContent)
+        await loadTree(activeApp.rootPath)
+        setPendingNewItem(null)
+        setPendingNewItemName('')
+        if (onOpenFile) onOpenFile(fullPath, initialContent)
+      } else {
+        await appCreateDir(fullPath, true)
+        await loadTree(activeApp.rootPath)
+        setPendingNewItem(null)
+        setPendingNewItemName('')
+      }
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e)
+      setError(errMsg)
+    }
+  }, [pendingNewItem, pendingNewItemName, activeApp, onOpenFile, loadTree])
+
+  const cancelPendingNewItem = useCallback(() => {
+    setPendingNewItem(null)
+    setPendingNewItemName('')
+  }, [])
+
+  const handlePendingKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      e.stopPropagation()
+      submitPendingNewItem()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      cancelPendingNewItem()
+    }
+  }
+
+  const handlePendingBlur = () => {
+    if (pendingNewItemName.trim()) {
+      submitPendingNewItem()
+    } else {
+      cancelPendingNewItem()
+    }
+  }
+
+  const handleFileClick = async (path: string) => {
+    if (!onOpenFile) return
+    try {
+      const content = await appReadTextFile(path)
+      onOpenFile(path, content)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const handleMove = useCallback(
+    async (args: { dragIds: string[]; parentId: string | null; parentNode: unknown }) => {
+      if (!activeApp?.rootPath) return
+      const toDir = args.parentId ?? activeApp.rootPath
+      setError(null)
+      try {
+        for (const id of args.dragIds) {
+          await appMove(id, toDir)
+        }
+        await loadTree(activeApp.rootPath)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [activeApp?.rootPath, loadTree]
+  )
+
+  const handleRename = useCallback(
+    async (args: { id: string; name: string }) => {
+      if (!activeApp?.rootPath) return
+      setError(null)
+      try {
+        await appRename(args.id, args.name)
+        await loadTree(activeApp.rootPath)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [activeApp?.rootPath, loadTree]
+  )
+
+  const handleDelete = useCallback(
+    async (args: { ids: string[] }) => {
+      if (!activeApp?.rootPath) return
+      setError(null)
+      try {
+        for (const id of args.ids) {
+          await appDelete(id, true)
+        }
+        await loadTree(activeApp.rootPath)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [activeApp?.rootPath, loadTree]
+  )
+
+  const treeContainerRef = useRef<HTMLDivElement>(null)
+  const treeRef = useRef<TreeApi<TreeNode> | null | undefined>(null)
+
+  const pendingTypeRef = useRef<'file' | 'folder'>('file')
+  if (pendingNewItem) pendingTypeRef.current = pendingNewItem.type
+
+  const treeWithPending =
+    pendingNewItem && activeApp
+      ? injectPendingNode(
+          tree,
+          pendingNewItem.parentPath,
+          activeApp.rootPath,
+          {
+            name: '',
+            path: `${pendingNewItem.type === 'folder' ? PENDING_FOLDER : PENDING_FILE}${pendingNewItem.parentPath}`,
+            isDir: false,
+          }
+        )
+      : tree
+
+  useEffect(() => {
+    if (pendingNewItem && treeRef.current && pendingNewItem.parentPath !== activeApp?.rootPath) {
+      treeRef.current.open(pendingNewItem.parentPath)
+    }
+  }, [pendingNewItem, activeApp?.rootPath])
+  const [treeHeight, setTreeHeight] = useState(400)
+
+  useEffect(() => {
+    const el = treeContainerRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const { height } = entries[0]?.contentRect ?? {}
+      if (typeof height === 'number' && height > 0) setTreeHeight(height)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [activeApp, loading])
+
+  return (
+    <div
+      className={cn(
+        'bg-[#252526] border-r border-[#3e3e3e] transition-all duration-200 flex flex-col',
+        expanded ? 'w-64' : 'w-12'
+      )}
+    >
       {expanded && (
-        <div className="flex-1 overflow-y-auto p-3">
-        
-          <div className="space-y-1">
-           
+        <>
+          {activeApp && (
+            <div className="p-2 border-b border-[#3e3e3e] flex flex-col gap-2">
+              <div className="flex items-center gap-1 min-w-0">
+                <span className="truncate text-sm font-medium text-gray-200" title={activeApp.name}>
+                  {activeApp.name}
+                </span>
+                <div className="flex items-center gap-0.5 shrink-0 ml-auto">
+                  <button
+                    type="button"
+                    onClick={handleCreateFile}
+                    className="p-1.5 rounded hover:bg-[#2a2d2e] text-gray-400 hover:text-gray-200"
+                    title="New file"
+                  >
+                    <FilePlus className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateFolder}
+                    className="p-1.5 rounded hover:bg-[#2a2d2e] text-gray-400 hover:text-gray-200"
+                    title="New folder"
+                  >
+                    <FolderPlus className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 px-1 py-0.5 rounded bg-[#2a2d2e] border border-transparent focus-within:border-[#007acc]/50">
+                <Search className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search files..."
+                  className="flex-1 min-w-0 bg-transparent text-sm text-gray-200 placeholder:text-gray-500 outline-none"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex-1 flex flex-col overflow-hidden p-2 min-h-0">
+            {error && (
+              <p className="text-xs text-red-400 mb-2 px-1 shrink-0">{error}</p>
+            )}
+            {loading && (
+              <p className="text-xs text-gray-500 px-1 shrink-0">Loading…</p>
+            )}
+            {activeApp && !loading && (
+              <div ref={treeContainerRef} className="flex-1 min-h-0 overflow-hidden -mx-1">
+                <Tree<TreeNode>
+                  ref={(api) => {
+                    treeRef.current = api ?? null
+                  }}
+                  data={treeWithPending}
+                  idAccessor="path"
+                  childrenAccessor="children"
+                  openByDefault
+                  width="100%"
+                  height={treeHeight}
+                  rowHeight={24}
+                  indent={12}
+                  onMove={handleMove}
+                  onRename={handleRename}
+                  onDelete={handleDelete}
+                  searchTerm={searchTerm || undefined}
+                  searchMatch={(node, term) =>
+                    node.data.name.toLowerCase().includes(term.toLowerCase())
+                  }
+                  disableEdit={(data) =>
+                    data.path.startsWith(PENDING_FILE) ||
+                    data.path.startsWith(PENDING_FOLDER)
+                  }
+                  disableDrag={(data) =>
+                    data.path.startsWith(PENDING_FILE) ||
+                    data.path.startsWith(PENDING_FOLDER)
+                  }
+                  disableDrop={({ parentNode, dragNodes }) =>
+                    dragNodes.some((n) => parentNode && n.isAncestorOf(parentNode))
+                  }
+                  onActivate={(node) => {
+                    if (
+                      node.data.path.startsWith(PENDING_FILE) ||
+                      node.data.path.startsWith(PENDING_FOLDER)
+                    )
+                      return
+                    setSelectedPath(node.data.path)
+                    if (node.isLeaf && !node.data.isDir) handleFileClick(node.data.path)
+                  }}
+                >
+                  {(props) => (
+                    <SidebarNode
+                      {...props}
+                      selectedPath={selectedPath}
+                      onSelectPath={setSelectedPath}
+                      isPendingNode={
+                        props.node.data.path.startsWith(PENDING_FILE) ||
+                        props.node.data.path.startsWith(PENDING_FOLDER)
+                      }
+                      pendingNewItem={pendingNewItem}
+                      pendingNewItemName={pendingNewItemName}
+                      pendingInputRef={pendingInputRef}
+                      onPendingKeyDown={handlePendingKeyDown}
+                      onPendingBlur={handlePendingBlur}
+                      onPendingChange={(v) => setPendingNewItemName(v)}
+                      onDeleteNodes={(ids) => handleDelete({ ids })}
+                      onNewFile={(parentPath) => setPendingNewItem({ type: 'file', parentPath })}
+                      onNewFolder={(parentPath) => setPendingNewItem({ type: 'folder', parentPath })}
+                    />
+                  )}
+                </Tree>
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
 
-      {/* Sidebar Toggle */}
-      <div className="border-t border-[#3e3e3e] p-2">
+      <div className="border-t border-[#3e3e3e] p-2 shrink-0">
         <button
+          type="button"
           onClick={onToggle}
           className="w-full flex items-center justify-center p-2 hover:bg-[#2a2d2e] rounded transition-colors"
-          title={expanded ? "Collapse sidebar" : "Expand sidebar"}
+          title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
         >
-          <ChevronRight className={cn(
-            "w-4 h-4 transition-transform",
-            !expanded && "rotate-180"
-          )} />
+          <ChevronRight
+            className={cn('w-4 h-4 transition-transform', !expanded && 'rotate-180')}
+          />
         </button>
       </div>
     </div>

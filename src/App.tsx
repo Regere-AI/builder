@@ -8,8 +8,30 @@ import { LaunchpadSelectPage } from './components/ide/LaunchpadSelectPage'
 import { cn } from './lib/utils'
 import { Mail, Lock } from 'lucide-react'
 import type { LaunchpadConfig } from './services/api'
+import { isTauri, getDefaultWorkspaceRoot, ensureAppFolder } from './desktop'
 
 type View = 'signup' | 'signin' | 'otp' | '2fa' | 'license' | 'launchpad' | 'welcome'
+
+function getHostLabel(url: string): string {
+  try {
+    const u = new URL(url.startsWith('http') ? url : `https://${url}`)
+    return u.hostname.replace(/^www\./, '') || url
+  } catch {
+    return url.replace(/^https?:\/\//, '').replace(/\/$/, '').slice(0, 32) || 'App'
+  }
+}
+
+function slugify(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[/\\]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+  return slug || ''
+}
 
 interface User {
   id: string
@@ -24,6 +46,7 @@ function App() {
   const [userEmail, setUserEmail] = useState('')
   const [user, setUser] = useState<User | null>(null)
   const [selectedLaunchpad, setSelectedLaunchpad] = useState<LaunchpadConfig | null>(null)
+  const [activeApp, setActiveApp] = useState<{ rootPath: string; name: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const handleSignupSuccess = (email: string) => {
@@ -80,6 +103,22 @@ function App() {
     setSelectedLaunchpad(launchpad)
     setCurrentView('welcome')
     setError(null)
+    if (!launchpad) {
+      setActiveApp(null)
+      return
+    }
+    if (!isTauri()) return
+    const displayName = launchpad.customerName?.trim() || getHostLabel(launchpad.url)
+    const appFolderName = slugify(displayName) || launchpad.id || 'app'
+    ;(async () => {
+      try {
+        const workspaceRoot = await getDefaultWorkspaceRoot()
+        const rootPath = await ensureAppFolder(workspaceRoot, appFolderName, displayName)
+        setActiveApp({ rootPath, name: displayName })
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    })()
   }
 
   const handleError = (errorMessage: string) => {
@@ -97,6 +136,7 @@ function App() {
     localStorage.removeItem('userData')
     setUser(null)
     setSelectedLaunchpad(null)
+    setActiveApp(null)
     setCurrentView('signin')
     setError(null)
     setActiveTab('signin')
@@ -150,7 +190,15 @@ function App() {
         {currentView === 'launchpad' && user ? (
           <LaunchpadSelectPage user={user} onGetIn={handleLaunchpadGetIn} />
         ) : currentView === 'welcome' && user ? (
-          <IDELayout user={user} onLogout={handleLogout} selectedLaunchpad={selectedLaunchpad} onSwitchLaunchpad={() => setCurrentView('launchpad')} />
+          <IDELayout
+            user={user}
+            onLogout={handleLogout}
+            selectedLaunchpad={selectedLaunchpad}
+            onSwitchLaunchpad={() => setCurrentView('launchpad')}
+            activeApp={activeApp}
+            onOpenApp={setActiveApp}
+            onCloseApp={() => setActiveApp(null)}
+          />
         ) : currentView === 'otp' ? (
           <>
             <VerificationCode

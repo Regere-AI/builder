@@ -4,7 +4,9 @@ import { Button } from '../ui/button'
 import { EditorView } from './EditorView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
 import { LayoutRenderer, defaultLayoutRegistry, type LayoutNode } from './LayoutRenderer'
-import { openFile as desktopOpenFile, saveFile as desktopSaveFile, isTauri } from '@/desktop'
+import { openFile as desktopOpenFile, saveFile as desktopSaveFile, appWriteTextFile, isTauri } from '@/desktop'
+import type { ActiveApp } from './IDELayout'
+import type { AgentResponsePayload } from './ChatPanel'
 
 function parseLayoutJson(content: string): LayoutNode | null {
   try {
@@ -25,14 +27,38 @@ interface BuilderDashboardProps {
     lastName: string
     email: string
   }
-  activeProject?: any
-  agentResponse?: any
+  activeProject?: unknown
+  activeApp?: ActiveApp | null
+  registerOpenFileFromSidebar?: (handler: (path: string, content: string) => void) => void
+  onAppFilesChanged?: () => void
+  onAgentResponseProcessed?: () => void
+  agentResponse?: AgentResponsePayload
 }
 
-export function BuilderDashboard({ user, activeProject, agentResponse }: BuilderDashboardProps) {
+export function BuilderDashboard({ user, activeProject, activeApp, registerOpenFileFromSidebar, onAppFilesChanged, onAgentResponseProcessed, agentResponse }: BuilderDashboardProps) {
   const [openFiles, setOpenFiles] = useState<EditorFile[]>([])
   const [activeFile, setActiveFile] = useState<EditorFile | null>(null)
   const [showPreview, setShowPreview] = useState(false)
+  const openFilesRef = useRef<EditorFile[]>([])
+  openFilesRef.current = openFiles
+
+  useEffect(() => {
+    if (!registerOpenFileFromSidebar) return
+    const handler = (path: string, content: string) => {
+      if (path == null || typeof path !== 'string') return
+      const existing = openFilesRef.current.find((f) => f.path === path)
+      if (existing) {
+        setActiveFile(existing)
+        return
+      }
+      const name = path.split(/[\\/]/).pop() || path
+      const newFile: EditorFile = { path, name, content, isModified: false }
+      setOpenFiles((prev) => [...prev, newFile])
+      setActiveFile(newFile)
+    }
+    registerOpenFileFromSidebar(handler)
+    return () => registerOpenFileFromSidebar(() => {})
+  }, [registerOpenFileFromSidebar])
 
   const handleOpenProject = () => {
     console.log('Open project clicked')
@@ -401,43 +427,55 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
     }
   }, [])
 
-  // Handle agent responses - open files from agent
+  // Handle agent responses - open files from agent (write to uiConfigs when activeApp is set)
   useEffect(() => {
     if (!agentResponse) return
 
     // If agent response contains code to create/edit files
     if (agentResponse.type === 'code' && agentResponse.content?.code) {
-      const filePath = agentResponse.content.filePath || 'untitled.ts'
-      const fileName = filePath.split(/[\\/]/).pop() || filePath
-      
-      const newFile: EditorFile = {
-        path: filePath,
-        name: fileName,
-        content: agentResponse.content.code,
-        isModified: true,
-      }
+      const relativePath = agentResponse.content.filePath || 'untitled.ts'
+      const pathJoin = (...parts: string[]) =>
+        parts.filter(Boolean).join('/').replace(/\\/g, '/')
+      const resolvedPath = activeApp
+        ? pathJoin(activeApp.rootPath, relativePath)
+        : relativePath
 
-      // Check if file already exists
-      const existing = openFiles.find((f) => f.path === filePath)
-      if (existing) {
-        const updatedFile: EditorFile = {
-          ...existing,
-          content: agentResponse.content.code,
-          isModified: true,
+      const writeAndOpen = async () => {
+        if (activeApp && isTauri()) {
+          try {
+            await appWriteTextFile(resolvedPath, agentResponse.content.code)
+            onAppFilesChanged?.()
+          } catch (e) {
+            console.error('Failed to write generated file:', e)
+          }
         }
-        setOpenFiles((prev) =>
-          prev.map((f) =>
-            f.path === filePath ? updatedFile : f
+        const fileName = resolvedPath.split(/[\\/]/).pop() || resolvedPath
+        const newFile: EditorFile = {
+          path: resolvedPath,
+          name: fileName,
+          content: agentResponse.content.code,
+          isModified: !activeApp,
+        }
+        const existing = openFilesRef.current.find((f) => f.path === resolvedPath)
+        if (existing) {
+          const updatedFile: EditorFile = {
+            ...existing,
+            content: agentResponse.content.code,
+            isModified: !activeApp,
+          }
+          setOpenFiles((prev) =>
+            prev.map((f) => (f.path === resolvedPath ? updatedFile : f))
           )
-        )
-        setActiveFile(updatedFile)
-      } else {
-        // Add new file
-        setOpenFiles((prev) => [...prev, newFile])
-        setActiveFile(newFile)
+          setActiveFile(updatedFile)
+        } else {
+          setOpenFiles((prev) => [...prev, newFile])
+          setActiveFile(newFile)
+        }
+        onAgentResponseProcessed?.()
       }
+      writeAndOpen()
     }
-  }, [agentResponse])
+  }, [agentResponse, activeApp, onAppFilesChanged, onAgentResponseProcessed])
 
   // Reset preview when switching to a non-JSON file
   useEffect(() => {

@@ -36,6 +36,69 @@ export async function saveFile(
   return invoke<SaveFileResult>('save_file', { content, defaultPath })
 }
 
+// ----- App folder and file tree (for left sidebar) -----
+
+export interface OpenAppFolderResult {
+  canceled?: boolean
+  path?: string
+  error?: string
+}
+
+export async function openAppFolder(): Promise<OpenAppFolderResult> {
+  return invoke<OpenAppFolderResult>('open_app_folder')
+}
+
+export interface DirEntry {
+  name: string
+  isDir: boolean
+}
+
+export async function appReadDir(dirPath: string): Promise<DirEntry[]> {
+  return invoke<DirEntry[]>('app_read_dir', { dirPath })
+}
+
+export async function appReadTextFile(path: string): Promise<string> {
+  return invoke<string>('app_read_text_file', { path })
+}
+
+export async function appWriteTextFile(path: string, content: string): Promise<void> {
+  return invoke<void>('app_write_text_file', { path, content })
+}
+
+export async function appCreateDir(path: string, recursive?: boolean): Promise<void> {
+  return invoke<void>('app_create_dir', { path, recursive: recursive ?? true })
+}
+
+export async function appRename(oldPath: string, newName: string): Promise<void> {
+  return invoke<void>('app_rename', { oldPath, newName })
+}
+
+export async function appMove(fromPath: string, toDirPath: string): Promise<void> {
+  return invoke<void>('app_move', { fromPath, toDirPath })
+}
+
+export async function appDelete(path: string, recursive?: boolean): Promise<void> {
+  return invoke<void>('app_delete', { path, recursive: recursive ?? true })
+}
+
+/** Default workspace root for app folders (e.g. sample-project/tenant-a). */
+export async function getDefaultWorkspaceRoot(): Promise<string> {
+  return invoke<string>('get_default_workspace_root')
+}
+
+/** Ensure app folder exists with uiConfigs, workflows, app.manifest.json. Returns app root path. */
+export async function ensureAppFolder(
+  workspaceRoot: string,
+  appFolderName: string,
+  displayName: string
+): Promise<string> {
+  return invoke<string>('ensure_app_folder', {
+    workspaceRoot,
+    appFolderName,
+    displayName,
+  })
+}
+
 export interface GenerateOptions {
   stream?: boolean
   mode?: string

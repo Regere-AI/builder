@@ -4,6 +4,7 @@ mod api;
 
 use serde::Serialize;
 use std::fs;
+use tauri::Manager;
 use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 
@@ -80,6 +81,218 @@ async fn open_file(app: tauri::AppHandle) -> OpenFileResult {
             error: Some(e.to_string()),
         },
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenAppFolderResult {
+    canceled: bool,
+    path: Option<String>,
+    error: Option<String>,
+}
+
+#[tauri::command]
+async fn open_app_folder(app: tauri::AppHandle) -> OpenAppFolderResult {
+    let folder_path = app.dialog().file().blocking_pick_folder();
+    let Some(folder_path) = folder_path else {
+        return OpenAppFolderResult {
+            canceled: true,
+            path: None,
+            error: None,
+        };
+    };
+    match folder_path.into_path() {
+        Ok(p) => OpenAppFolderResult {
+            canceled: false,
+            path: Some(p.to_string_lossy().into_owned()),
+            error: None,
+        },
+        Err(e) => OpenAppFolderResult {
+            canceled: false,
+            path: None,
+            error: Some(e.to_string()),
+        },
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirEntry {
+    name: String,
+    is_dir: bool,
+}
+
+#[tauri::command]
+fn app_read_dir(dir_path: String) -> Result<Vec<DirEntry>, String> {
+    let path = std::path::Path::new(&dir_path);
+    let entries = fs::read_dir(path).map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        result.push(DirEntry { name, is_dir });
+    }
+    result.sort_by(|a, b| {
+        // folders first, then by name
+        match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+    Ok(result)
+}
+
+#[tauri::command]
+fn app_read_text_file(path: String) -> Result<String, String> {
+    fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn app_write_text_file(path: String, content: String) -> Result<(), String> {
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn app_create_dir(path: String, recursive: bool) -> Result<(), String> {
+    let path_buf = std::path::Path::new(&path).to_path_buf();
+    if path_buf.exists() {
+        if path_buf.is_file() {
+            return Err(format!(
+                "Cannot create directory: a file already exists at {}",
+                path_buf.display()
+            ));
+        }
+        return Ok(());
+    }
+    let res = if recursive {
+        fs::create_dir_all(&path_buf).map_err(|e| e.to_string())
+    } else {
+        if let Some(parent) = path_buf.parent() {
+            if !parent.exists() {
+                return Err(format!(
+                    "Parent directory does not exist: {}",
+                    parent.display()
+                ));
+            }
+        }
+        fs::create_dir(&path_buf).map_err(|e| e.to_string())
+    };
+    res
+}
+
+/// Rename a file or directory to a new name in the same parent directory.
+#[tauri::command]
+fn app_rename(old_path: String, new_name: String) -> Result<(), String> {
+    let new_name = new_name.trim();
+    if new_name.is_empty() {
+        return Err("Name cannot be empty".to_string());
+    }
+    if new_name.contains(std::path::MAIN_SEPARATOR) || new_name.contains('/') {
+        return Err("Name cannot contain path separators".to_string());
+    }
+    let old = std::path::Path::new(&old_path);
+    if !old.exists() {
+        return Err(format!("Path does not exist: {}", old_path));
+    }
+    let parent = old.parent().ok_or_else(|| "Invalid path (no parent)".to_string())?;
+    let new_path = parent.join(new_name);
+    fs::rename(old, &new_path).map_err(|e| e.to_string())
+}
+
+/// Move a file or directory into another directory.
+#[tauri::command]
+fn app_move(from_path: String, to_dir_path: String) -> Result<(), String> {
+    let from = std::path::Path::new(&from_path);
+    let to_dir = std::path::Path::new(&to_dir_path);
+    if !from.exists() {
+        return Err(format!("Source does not exist: {}", from_path));
+    }
+    if !to_dir.is_dir() {
+        return Err(format!("Destination is not a directory: {}", to_dir_path));
+    }
+    let name = from.file_name().ok_or_else(|| "Invalid source path".to_string())?;
+    let dest = to_dir.join(name);
+    if dest.exists() {
+        return Err(format!("Destination already exists: {}", dest.display()));
+    }
+    // Prevent moving a directory into itself or a descendant
+    if from.is_dir() {
+        let from_canon = from.canonicalize().map_err(|e| e.to_string())?;
+        if let Ok(to_canon) = to_dir.canonicalize() {
+            if to_canon.starts_with(&from_canon) {
+                return Err("Cannot move a directory into itself or a descendant".to_string());
+            }
+        }
+    }
+    fs::rename(from, &dest).map_err(|e| e.to_string())
+}
+
+/// Delete a file or directory. For directories, recursive must be true to remove non-empty dirs.
+#[tauri::command]
+fn app_delete(path: String, recursive: bool) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+    if p.is_file() {
+        fs::remove_file(p).map_err(|e| e.to_string())
+    } else if p.is_dir() {
+        if recursive {
+            fs::remove_dir_all(p).map_err(|e| e.to_string())
+        } else {
+            fs::remove_dir(p).map_err(|e| e.to_string())
+        }
+    } else {
+        Err("Path is neither a file nor a directory".to_string())
+    }
+}
+
+/// Returns the default workspace root in app data (e.g. sample-project/tenant-a).
+/// Uses the app data directory so it is always writable (avoids "Access is denied" when
+/// the app is installed in Program Files or the project is in a protected location).
+#[tauri::command]
+fn get_default_workspace_root(app: tauri::AppHandle) -> Result<String, String> {
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let workspace = app_data.join("sample-project").join("tenant-a");
+    if !workspace.exists() {
+        fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+    }
+    Ok(workspace.to_string_lossy().into_owned())
+}
+
+/// Creates app folder under workspace_root with uiConfigs, workflows, and app.manifest.json if missing.
+/// Returns the app root path.
+#[tauri::command]
+fn ensure_app_folder(
+    workspace_root: String,
+    app_folder_name: String,
+    display_name: String,
+) -> Result<String, String> {
+    let app_root = std::path::Path::new(&workspace_root).join(&app_folder_name);
+    fs::create_dir_all(&app_root).map_err(|e| e.to_string())?;
+
+    let ui_configs = app_root.join("uiConfigs");
+    let workflows = app_root.join("workflows");
+    fs::create_dir_all(&ui_configs).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&workflows).map_err(|e| e.to_string())?;
+
+    let manifest_path = app_root.join("app.manifest.json");
+    if !manifest_path.exists() {
+        let manifest = serde_json::json!({
+            "id": app_folder_name,
+            "name": display_name,
+            "version": "1.0.0"
+        });
+        let content = serde_json::to_string_pretty(&manifest).unwrap_or_else(|_| "{}".to_string());
+        fs::write(&manifest_path, content).map_err(|e| e.to_string())?;
+    }
+
+    Ok(app_root.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -267,6 +480,16 @@ pub fn run() {
             get_env,
             open_file,
             save_file,
+            open_app_folder,
+            app_read_dir,
+            app_read_text_file,
+            app_write_text_file,
+            app_create_dir,
+            app_rename,
+            app_move,
+            app_delete,
+            get_default_workspace_root,
+            ensure_app_folder,
             api::api_signup,
             api::api_send_otp,
             api::api_verify_otp,

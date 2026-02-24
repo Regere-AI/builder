@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { LeftSidebar } from './LeftSidebar'
 import { BuilderDashboard } from './BuilderDashboard'
 import { ChatPanel, type AgentResponsePayload } from './ChatPanel'
@@ -11,19 +11,32 @@ interface User {
   email: string
 }
 
+export interface ActiveApp {
+  rootPath: string
+  name: string
+}
+
 interface IDELayoutProps {
   user: User
-  activeProject?: any
+  activeProject?: unknown
+  activeApp: ActiveApp | null
+  onOpenApp: (app: ActiveApp | null) => void
+  onCloseApp: () => void
   selectedLaunchpad?: LaunchpadConfig | null
   onLogout: () => void
   onSwitchLaunchpad: () => void
 }
 
-export function IDELayout({ user, onLogout, activeProject, selectedLaunchpad, onSwitchLaunchpad }: IDELayoutProps) {
+export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp, onCloseApp, selectedLaunchpad, onSwitchLaunchpad }: IDELayoutProps) {
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
   const [chatPanelWidth, setChatPanelWidth] = useState(320)
   const [agentResponse, setAgentResponse] = useState<AgentResponsePayload | undefined>(undefined)
+  const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0)
+  const openFileFromSidebarHandlerRef = useRef<((path: string, content: string) => void) | null>(null)
+  const handleOpenFileFromSidebar = useCallback((path: string, content: string) => {
+    openFileFromSidebarHandlerRef.current?.(path, content)
+  }, [])
 
   // Keyboard shortcut handler for chat panel (Ctrl+L / Cmd+L)
   useEffect(() => {
@@ -54,13 +67,26 @@ export function IDELayout({ user, onLogout, activeProject, selectedLaunchpad, on
       {/* Main Layout */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Sidebar */}
-        <LeftSidebar 
+        <LeftSidebar
           expanded={sidebarExpanded}
           onToggle={() => setSidebarExpanded(!sidebarExpanded)}
+          activeApp={activeApp}
+          onOpenApp={onOpenApp}
+          onCloseApp={onCloseApp}
+          onOpenFile={handleOpenFileFromSidebar}
+          refreshTrigger={sidebarRefreshTrigger}
         />
 
         {/* Center Content - BuilderDashboard */}
-        <BuilderDashboard user={user} agentResponse={agentResponse} activeProject={activeProject} />
+        <BuilderDashboard
+          user={user}
+          agentResponse={agentResponse}
+          activeProject={activeProject}
+          activeApp={activeApp}
+          registerOpenFileFromSidebar={(handler) => { openFileFromSidebarHandlerRef.current = handler }}
+          onAppFilesChanged={() => setSidebarRefreshTrigger((n) => n + 1)}
+          onAgentResponseProcessed={() => setAgentResponse(undefined)}
+        />
 
         {/* Right Chat Panel */}
         <ChatPanel 
