@@ -31,6 +31,7 @@ interface BuilderDashboardProps {
   activeProject?: unknown
   activeApp?: ActiveApp | null
   registerOpenFileFromSidebar?: (handler: (path: string, content: string) => void) => void
+  registerFilesDeletedFromSidebar?: (handler: (paths: string[]) => void) => void
   onAppFilesChanged?: () => void
   onAgentResponseProcessed?: () => void
   agentResponse?: AgentResponsePayload
@@ -38,7 +39,17 @@ interface BuilderDashboardProps {
   onAddSelectionToChat?: (payload: EditorSelectionPayload) => void
 }
 
-export function BuilderDashboard({ user, activeProject, activeApp, registerOpenFileFromSidebar, onAppFilesChanged, onAgentResponseProcessed, agentResponse, onAddSelectionToChat }: BuilderDashboardProps) {
+export function BuilderDashboard({
+  user,
+  activeProject,
+  activeApp,
+  registerOpenFileFromSidebar,
+  registerFilesDeletedFromSidebar,
+  onAppFilesChanged,
+  onAgentResponseProcessed,
+  agentResponse,
+  onAddSelectionToChat,
+}: BuilderDashboardProps) {
   const [openFiles, setOpenFiles] = useState<EditorFile[]>([])
   const [activeFile, setActiveFile] = useState<EditorFile | null>(null)
   const [showPreview, setShowPreview] = useState(false)
@@ -65,6 +76,27 @@ export function BuilderDashboard({ user, activeProject, activeApp, registerOpenF
     registerOpenFileFromSidebar(handler)
     return () => registerOpenFileFromSidebar(() => {})
   }, [registerOpenFileFromSidebar])
+
+  // Close tabs when files/folders are deleted from the sidebar
+  useEffect(() => {
+    if (!registerFilesDeletedFromSidebar) return
+    const handler = (paths: string[]) => {
+      if (!Array.isArray(paths) || paths.length === 0) return
+      const isDeletedPath = (filePath: string) =>
+        paths.some((p) => filePath === p || filePath.startsWith(p.endsWith('/') ? p : `${p}/`))
+
+      setOpenFiles((prev) => prev.filter((f) => !isDeletedPath(f.path)))
+
+      setActiveFile((prev) => {
+        if (!prev) return prev
+        if (!isDeletedPath(prev.path)) return prev
+        const remaining = openFilesRef.current.filter((f) => !isDeletedPath(f.path))
+        return remaining.length > 0 ? remaining[remaining.length - 1] : null
+      })
+    }
+    registerFilesDeletedFromSidebar(handler)
+    return () => registerFilesDeletedFromSidebar(() => {})
+  }, [registerFilesDeletedFromSidebar])
 
   // Tauri: handle app:add-selection-to-chat (Ctrl+L / Cmd+L global shortcut)
   useEffect(() => {

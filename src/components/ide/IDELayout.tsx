@@ -36,8 +36,12 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
   const [agentResponse, setAgentResponse] = useState<AgentResponsePayload | undefined>(undefined)
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0)
   const openFileFromSidebarHandlerRef = useRef<((path: string, content: string) => void) | null>(null)
+  const filesDeletedFromSidebarHandlerRef = useRef<((paths: string[]) => void) | null>(null)
   const handleOpenFileFromSidebar = useCallback((path: string, content: string) => {
     openFileFromSidebarHandlerRef.current?.(path, content)
+  }, [])
+  const handleFilesDeletedFromSidebar = useCallback((paths: string[]) => {
+    filesDeletedFromSidebarHandlerRef.current?.(paths)
   }, [])
   const handleAddSelectionToChat = useCallback((payload: EditorSelectionPayload) => {
     setChatPanelOpen(true)
@@ -81,6 +85,7 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
           onOpenApp={onOpenApp}
           onCloseApp={onCloseApp}
           onOpenFile={handleOpenFileFromSidebar}
+          onDeletePaths={handleFilesDeletedFromSidebar}
           refreshTrigger={sidebarRefreshTrigger}
         />
 
@@ -91,6 +96,7 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
           activeProject={activeProject}
           activeApp={activeApp}
           registerOpenFileFromSidebar={(handler) => { openFileFromSidebarHandlerRef.current = handler }}
+          registerFilesDeletedFromSidebar={(handler) => { filesDeletedFromSidebarHandlerRef.current = handler }}
           onAppFilesChanged={() => setSidebarRefreshTrigger((n) => n + 1)}
           onAgentResponseProcessed={() => setAgentResponse(undefined)}
           onAddSelectionToChat={handleAddSelectionToChat}

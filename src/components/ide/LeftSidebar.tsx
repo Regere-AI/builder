@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
 import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search } from 'lucide-react'
 import { Tree } from 'react-arborist'
 import type { NodeRendererProps } from 'react-arborist'
@@ -38,6 +38,28 @@ function findNode(nodes: TreeNode[], path: string): TreeNode | null {
     }
   }
   return null
+}
+
+async function loadDirRecursive(dirPath: string): Promise<TreeNode[]> {
+  const entries = await appReadDir(dirPath)
+  const nodes: TreeNode[] = []
+  for (const e of entries) {
+    const fullPath = pathJoin(dirPath, e.name)
+    const node: TreeNode = {
+      name: e.name,
+      path: fullPath,
+      isDir: e.isDir,
+    }
+    if (e.isDir) {
+      try {
+        node.children = await loadDirRecursive(fullPath)
+      } catch {
+        node.children = []
+      }
+    }
+    nodes.push(node)
+  }
+  return nodes.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
 }
 
 const PENDING_FILE = '__pending_file__'
@@ -296,6 +318,8 @@ interface LeftSidebarProps {
   onOpenApp: (app: ActiveApp | null) => void
   onCloseApp: () => void
   onOpenFile?: (path: string, content: string) => void
+  /** Called after files/folders are deleted so the editor can close them. */
+  onDeletePaths?: (paths: string[]) => void
   /** Increment to refresh the file tree (e.g. after chat creates a file in the app). */
   refreshTrigger?: number
 }
@@ -314,6 +338,7 @@ export function LeftSidebar({
   onOpenApp: _onOpenApp,
   onCloseApp: _onCloseApp,
   onOpenFile,
+  onDeletePaths,
   refreshTrigger,
 }: LeftSidebarProps) {
   const [tree, setTree] = useState<TreeNode[]>([])
@@ -323,6 +348,7 @@ export function LeftSidebar({
   const [pendingNewItem, setPendingNewItem] = useState<{ type: 'file' | 'folder'; parentPath: string } | null>(null)
   const [pendingNewItemName, setPendingNewItemName] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
+  const [deleteConfirmPending, setDeleteConfirmPending] = useState<string[] | null>(null)
   const pendingInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -333,6 +359,17 @@ export function LeftSidebar({
       return () => clearTimeout(t)
     }
   }, [pendingNewItem])
+
+  // Restore focus when it is lost after typing (e.g. tree re-render unmounts/remounts the row)
+  useLayoutEffect(() => {
+    if (!pendingNewItem || !pendingInputRef.current) return
+    const id = requestAnimationFrame(() => {
+      if (pendingInputRef.current && document.activeElement !== pendingInputRef.current) {
+        pendingInputRef.current.focus()
+      }
+    })
+    return () => cancelAnimationFrame(id)
+  }, [pendingNewItem, pendingNewItemName])
 
   const loadTree = useCallback(async (rootPath: string, options?: { silent?: boolean }) => {
     const silent = options?.silent === true
@@ -356,20 +393,12 @@ export function LeftSidebar({
         })
       }
 
-      // uiConfigs folder (always show)
+      // uiConfigs folder (always show), with nested contents so new files in subfolders appear
       const hasUiConfigs = entries.some((e) => e.isDir && e.name === 'uiConfigs')
-      const uiConfigsChildren: TreeNode[] = []
+      let uiConfigsChildren: TreeNode[] = []
       if (hasUiConfigs) {
         try {
-          const uiEntries = await appReadDir(uiConfigsPath)
-          for (const e of uiEntries) {
-            uiConfigsChildren.push({
-              name: e.name,
-              path: pathJoin(uiConfigsPath, e.name),
-              isDir: e.isDir,
-              ...(e.isDir ? { children: [] as TreeNode[] } : {}),
-            })
-          }
+          uiConfigsChildren = await loadDirRecursive(uiConfigsPath)
         } catch {
           // ignore
         }
@@ -378,23 +407,15 @@ export function LeftSidebar({
         name: 'uiConfigs',
         path: uiConfigsPath,
         isDir: true,
-        children: uiConfigsChildren.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1)),
+        children: uiConfigsChildren,
       })
 
-      // workflows folder (always show)
+      // workflows folder (always show), with nested contents
       const hasWorkflows = entries.some((e) => e.isDir && e.name === 'workflows')
-      const workflowsChildren: TreeNode[] = []
+      let workflowsChildren: TreeNode[] = []
       if (hasWorkflows) {
         try {
-          const wfEntries = await appReadDir(workflowsPath)
-          for (const e of wfEntries) {
-            workflowsChildren.push({
-              name: e.name,
-              path: pathJoin(workflowsPath, e.name),
-              isDir: e.isDir,
-              ...(e.isDir ? { children: [] as TreeNode[] } : {}),
-            })
-          }
+          workflowsChildren = await loadDirRecursive(workflowsPath)
         } catch {
           // ignore
         }
@@ -403,7 +424,7 @@ export function LeftSidebar({
         name: 'workflows',
         path: workflowsPath,
         isDir: true,
-        children: workflowsChildren.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1)),
+        children: workflowsChildren,
       })
 
       setTree(rootNodes)
@@ -544,20 +565,28 @@ export function LeftSidebar({
     [activeApp?.rootPath, loadTree]
   )
 
-  const handleDelete = useCallback(
-    async (args: { ids: string[] }) => {
+  const handleDelete = useCallback((args: { ids: string[] }) => {
+    if (!activeApp?.rootPath) return
+    setDeleteConfirmPending(args.ids)
+  }, [activeApp?.rootPath])
+
+  const executeDelete = useCallback(
+    async (ids: string[]) => {
       if (!activeApp?.rootPath) return
       setError(null)
       try {
-        for (const id of args.ids) {
+        for (const id of ids) {
           await appDelete(id, true)
         }
+        onDeletePaths?.(ids)
         await loadTree(activeApp.rootPath)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setDeleteConfirmPending(null)
       }
     },
-    [activeApp?.rootPath, loadTree]
+    [activeApp?.rootPath, loadTree, onDeletePaths]
   )
 
   const treeContainerRef = useRef<HTMLDivElement>(null)
@@ -566,19 +595,19 @@ export function LeftSidebar({
   const pendingTypeRef = useRef<'file' | 'folder'>('file')
   if (pendingNewItem) pendingTypeRef.current = pendingNewItem.type
 
-  const treeWithPending =
-    pendingNewItem && activeApp
-      ? injectPendingNode(
-          tree,
-          pendingNewItem.parentPath,
-          activeApp.rootPath,
-          {
-            name: '',
-            path: `${pendingNewItem.type === 'folder' ? PENDING_FOLDER : PENDING_FILE}${pendingNewItem.parentPath}`,
-            isDir: false,
-          }
-        )
-      : tree
+  const treeWithPending = useMemo(() => {
+    if (!pendingNewItem || !activeApp) return tree
+    return injectPendingNode(
+      tree,
+      pendingNewItem.parentPath,
+      activeApp.rootPath,
+      {
+        name: '',
+        path: `${pendingNewItem.type === 'folder' ? PENDING_FOLDER : PENDING_FILE}${pendingNewItem.parentPath}`,
+        isDir: false,
+      }
+    )
+  }, [tree, pendingNewItem, activeApp?.rootPath])
 
   useEffect(() => {
     if (pendingNewItem && treeRef.current && pendingNewItem.parentPath !== activeApp?.rootPath) {
@@ -733,6 +762,41 @@ export function LeftSidebar({
           />
         </button>
       </div>
+
+      {/* Delete confirmation modal */}
+      {deleteConfirmPending && deleteConfirmPending.length > 0 && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setDeleteConfirmPending(null)}
+        >
+          <div
+            className="bg-[#252526] border border-[#3e3e3e] rounded-lg shadow-xl p-4 max-w-sm mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm text-gray-200 mb-4">
+              {deleteConfirmPending.length === 1
+                ? 'Are you sure you want to delete this item?'
+                : `Are you sure you want to delete these ${deleteConfirmPending.length} items?`}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmPending(null)}
+                className="px-3 py-1.5 text-sm rounded bg-[#3e3e3e] text-gray-200 hover:bg-[#4e4e4e]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => executeDelete(deleteConfirmPending)}
+                className="px-3 py-1.5 text-sm rounded bg-red-600/80 text-white hover:bg-red-600"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
