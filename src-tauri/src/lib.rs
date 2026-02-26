@@ -425,18 +425,20 @@ pub fn run() {
                 // On Windows/Linux use Ctrl; on macOS use Cmd (META). Avoid registering both
                 // so we don't conflict with the native menu's CmdOrCtrl (e.g. SUPER+N on Windows).
                 #[cfg(target_os = "macos")]
-                let (mod_n, mod_o, mod_s, mod_shift_s) = (
+                let (mod_n, mod_o, mod_s, mod_shift_s, mod_l) = (
                     Shortcut::new(Some(Modifiers::META), Code::KeyN),
                     Shortcut::new(Some(Modifiers::META), Code::KeyO),
                     Shortcut::new(Some(Modifiers::META), Code::KeyS),
                     Shortcut::new(Some(Modifiers::META | Modifiers::SHIFT), Code::KeyS),
+                    Shortcut::new(Some(Modifiers::META), Code::KeyL),
                 );
                 #[cfg(not(target_os = "macos"))]
-                let (mod_n, mod_o, mod_s, mod_shift_s) = (
+                let (mod_n, mod_o, mod_s, mod_shift_s, mod_l) = (
                     Shortcut::new(Some(Modifiers::CONTROL), Code::KeyN),
                     Shortcut::new(Some(Modifiers::CONTROL), Code::KeyO),
                     Shortcut::new(Some(Modifiers::CONTROL), Code::KeyS),
                     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS),
+                    Shortcut::new(Some(Modifiers::CONTROL), Code::KeyL),
                 );
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
@@ -449,6 +451,8 @@ pub fn run() {
                                 Some("menu:save")
                             } else if shortcut == &mod_shift_s {
                                 Some("menu:save-as")
+                            } else if shortcut == &mod_l {
+                                Some("app:add-selection-to-chat")
                             } else {
                                 None
                             };
@@ -465,6 +469,7 @@ pub fn run() {
                     gs.register(Shortcut::new(Some(Modifiers::META), Code::KeyO))?;
                     gs.register(Shortcut::new(Some(Modifiers::META), Code::KeyS))?;
                     gs.register(Shortcut::new(Some(Modifiers::META | Modifiers::SHIFT), Code::KeyS))?;
+                    gs.register(Shortcut::new(Some(Modifiers::META), Code::KeyL))?;
                 }
                 #[cfg(not(target_os = "macos"))]
                 {
@@ -472,6 +477,7 @@ pub fn run() {
                     gs.register(Shortcut::new(Some(Modifiers::CONTROL), Code::KeyO))?;
                     gs.register(Shortcut::new(Some(Modifiers::CONTROL), Code::KeyS))?;
                     gs.register(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS))?;
+                    gs.register(Shortcut::new(Some(Modifiers::CONTROL), Code::KeyL))?;
                 }
             }
             Ok(())

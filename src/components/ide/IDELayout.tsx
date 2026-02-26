@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { LeftSidebar } from './LeftSidebar'
 import { BuilderDashboard } from './BuilderDashboard'
 import { ChatPanel, type AgentResponsePayload } from './ChatPanel'
+import type { EditorSelectionPayload } from './EditorView'
 import { StatusBar } from './StatusBar'
 import type { LaunchpadConfig } from '@/services/api'
 
@@ -31,12 +32,18 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
   const [chatPanelWidth, setChatPanelWidth] = useState(320)
+  const [pendingChatContext, setPendingChatContext] = useState<EditorSelectionPayload | null>(null)
   const [agentResponse, setAgentResponse] = useState<AgentResponsePayload | undefined>(undefined)
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0)
   const openFileFromSidebarHandlerRef = useRef<((path: string, content: string) => void) | null>(null)
   const handleOpenFileFromSidebar = useCallback((path: string, content: string) => {
     openFileFromSidebarHandlerRef.current?.(path, content)
   }, [])
+  const handleAddSelectionToChat = useCallback((payload: EditorSelectionPayload) => {
+    setChatPanelOpen(true)
+    setPendingChatContext(payload)
+  }, [])
+  const handleConsumePendingContext = useCallback(() => setPendingChatContext(null), [])
 
   // Keyboard shortcut handler for chat panel (Ctrl+L / Cmd+L)
   useEffect(() => {
@@ -86,6 +93,7 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
           registerOpenFileFromSidebar={(handler) => { openFileFromSidebarHandlerRef.current = handler }}
           onAppFilesChanged={() => setSidebarRefreshTrigger((n) => n + 1)}
           onAgentResponseProcessed={() => setAgentResponse(undefined)}
+          onAddSelectionToChat={handleAddSelectionToChat}
         />
 
         {/* Right Chat Panel */}
@@ -95,6 +103,8 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
           width={chatPanelWidth}
           onWidthChange={setChatPanelWidth}
           onAgentResponse={setAgentResponse}
+          pendingContext={pendingChatContext}
+          onConsumePendingContext={handleConsumePendingContext}
         />
       </div>
 

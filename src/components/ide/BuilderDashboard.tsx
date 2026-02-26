@@ -7,6 +7,7 @@ import { LayoutRenderer, defaultLayoutRegistry, type LayoutNode } from './Layout
 import { openFile as desktopOpenFile, saveFile as desktopSaveFile, appWriteTextFile, isTauri } from '@/desktop'
 import type { ActiveApp } from './IDELayout'
 import type { AgentResponsePayload } from './ChatPanel'
+import type { GetEditorSelection, EditorSelectionPayload } from './EditorView'
 
 function parseLayoutJson(content: string): LayoutNode | null {
   try {
@@ -33,14 +34,19 @@ interface BuilderDashboardProps {
   onAppFilesChanged?: () => void
   onAgentResponseProcessed?: () => void
   agentResponse?: AgentResponsePayload
+  /** When user adds selection to chat (e.g. Ctrl+L), open panel and set context. */
+  onAddSelectionToChat?: (payload: EditorSelectionPayload) => void
 }
 
-export function BuilderDashboard({ user, activeProject, activeApp, registerOpenFileFromSidebar, onAppFilesChanged, onAgentResponseProcessed, agentResponse }: BuilderDashboardProps) {
+export function BuilderDashboard({ user, activeProject, activeApp, registerOpenFileFromSidebar, onAppFilesChanged, onAgentResponseProcessed, agentResponse, onAddSelectionToChat }: BuilderDashboardProps) {
   const [openFiles, setOpenFiles] = useState<EditorFile[]>([])
   const [activeFile, setActiveFile] = useState<EditorFile | null>(null)
   const [showPreview, setShowPreview] = useState(false)
   const openFilesRef = useRef<EditorFile[]>([])
   openFilesRef.current = openFiles
+  const getEditorSelectionRef = useRef<GetEditorSelection>(() => null)
+  const onAddSelectionToChatRef = useRef(onAddSelectionToChat)
+  onAddSelectionToChatRef.current = onAddSelectionToChat
 
   useEffect(() => {
     if (!registerOpenFileFromSidebar) return
@@ -59,6 +65,21 @@ export function BuilderDashboard({ user, activeProject, activeApp, registerOpenF
     registerOpenFileFromSidebar(handler)
     return () => registerOpenFileFromSidebar(() => {})
   }, [registerOpenFileFromSidebar])
+
+  // Tauri: handle app:add-selection-to-chat (Ctrl+L / Cmd+L global shortcut)
+  useEffect(() => {
+    if (!isTauri() || !onAddSelectionToChat) return
+    let unlisten: (() => void) | undefined
+    listen('app:add-selection-to-chat', () => {
+      let payload = getEditorSelectionRef.current()
+      if (!payload) {
+        const docText = window.getSelection()?.toString()?.trim() ?? ''
+        if (docText) payload = { filePath: '', startLine: 0, endLine: 0, text: docText }
+      }
+      if (payload) onAddSelectionToChatRef.current?.(payload)
+    }).then((fn) => { unlisten = fn })
+    return () => { unlisten?.() }
+  }, [onAddSelectionToChat])
 
   const handleOpenProject = () => {
     console.log('Open project clicked')
@@ -546,6 +567,7 @@ export function BuilderDashboard({ user, activeProject, activeApp, registerOpenF
               file={activeFile}
               onChange={handleFileChange}
               onSave={handleSave}
+              onRegisterGetSelection={(getter) => { getEditorSelectionRef.current = getter }}
             />
           )
         ) : activeProject ? (

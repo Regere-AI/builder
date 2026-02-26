@@ -12,14 +12,30 @@ interface File {
   content: string
 }
 
+/** Selection from editor: file path, 1-based line range, and selected text. */
+export interface EditorSelectionPayload {
+  filePath: string
+  startLine: number
+  endLine: number
+  text: string
+}
+
+export type GetEditorSelection = () => EditorSelectionPayload | null
+
 interface EditorViewProps {
   file: File
   onChange?: (value: string) => void
   onSave?: () => void
+  /** Called when editor mounts/unmounts so parent can get current selection (Monaco API). */
+  onRegisterGetSelection?: (getSelection: GetEditorSelection) => void
 }
 
-export function EditorView({ file, onChange, onSave }: EditorViewProps) {
+export function EditorView({ file, onChange, onSave, onRegisterGetSelection }: EditorViewProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
+  const filePathRef = useRef(file.path)
+  filePathRef.current = file.path
+  const onRegisterRef = useRef(onRegisterGetSelection)
+  onRegisterRef.current = onRegisterGetSelection
 
   // Handle save keyboard shortcut (Ctrl+S / Cmd+S)
   useEffect(() => {
@@ -41,7 +57,30 @@ export function EditorView({ file, onChange, onSave }: EditorViewProps) {
 
   const handleEditorDidMount = (editor: editor.IStandaloneCodeEditor) => {
     editorRef.current = editor
+    onRegisterGetSelection?.(() => {
+      const ed = editorRef.current
+      if (!ed) return null
+      const model = ed.getModel()
+      const selection = ed.getSelection()
+      if (!model || !selection) return null
+      const text = model.getValueInRange(selection).trim()
+      if (!text) return null
+      return {
+        filePath: filePathRef.current,
+        startLine: selection.startLineNumber,
+        endLine: selection.endLineNumber,
+        text,
+      }
+    })
   }
+
+  // Clear getSelection when editor unmounts (e.g. switch to preview or close file)
+  useEffect(() => {
+    return () => {
+      editorRef.current = null
+      onRegisterRef.current?.(() => null)
+    }
+  }, [])
 
   // Auto-detect language from file extension
   const detectLanguage = (path: string): string => {
