@@ -33,7 +33,7 @@ interface LaunchpadSelectPageProps {
   onGetIn: (selectedLaunchpad: LaunchpadConfig | null) => void
 }
 
-const initialForm = { url: '', email: '', password: '', color: DEFAULT_COLOR, environment: 'dev' as LaunchpadEnvironment, customerName: '' }
+const initialForm = { url: '', email: '', password: '', color: DEFAULT_COLOR, environment: 'dev' as LaunchpadEnvironment, customerName: '', tenant: '' }
 
 export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps) {
   const [launchpads, setLaunchpads] = useState<LaunchpadConfig[]>([])
@@ -54,8 +54,9 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
       const url = (c.url ?? '').toLowerCase()
       const email = (c.email ?? '').toLowerCase()
       const customerName = (c.customerName ?? '').toLowerCase()
+      const tenant = (c.tenant ?? '').toLowerCase()
       const env = (c.environment ?? 'dev').toLowerCase()
-      return url.includes(q) || email.includes(q) || customerName.includes(q) || env.includes(q)
+      return url.includes(q) || email.includes(q) || customerName.includes(q) || tenant.includes(q) || env.includes(q)
     })
   }, [launchpads, searchQuery])
 
@@ -96,6 +97,7 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
       color: config.color ?? DEFAULT_COLOR,
       environment: config.environment ?? 'dev',
       customerName: config.customerName ?? '',
+      tenant: config.tenant ?? '',
     })
     setFormError(null)
     setDialogOpen(true)
@@ -119,6 +121,16 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
       setFormError('Email is required')
       return
     }
+    const tenant = form.tenant.trim()
+    if (!tenant) {
+      setFormError('Tenant is required')
+      return
+    }
+    const customerName = form.customerName.trim()
+    if (!customerName) {
+      setFormError('Customer name is required')
+      return
+    }
     if (!editId && !form.password) {
       setFormError('Password is required')
       return
@@ -131,12 +143,13 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
           url,
           email,
           ...(form.password ? { password: form.password } : {}),
+          tenant,
           color: form.color || DEFAULT_COLOR,
           environment: form.environment,
-          customerName: form.customerName.trim() || undefined,
+          customerName,
         })
       } else {
-        await launchpadAdd({ url, email, password: form.password, color: form.color || DEFAULT_COLOR, environment: form.environment, customerName: form.customerName.trim() || undefined })
+        await launchpadAdd({ url, email, password: form.password, tenant, customerName, color: form.color || DEFAULT_COLOR, environment: form.environment })
       }
       loadLaunchpads()
       closeDialog()
@@ -374,15 +387,28 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
               {formError && (
                 <p className="text-sm text-red-400">{formError}</p>
               )}
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1.5">Customer name (optional)</label>
-                <input
-                  type="text"
-                  value={form.customerName}
-                  onChange={(e) => setForm((f) => ({ ...f, customerName: e.target.value }))}
-                  placeholder="e.g. Acme Corp"
-                  className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
-                />
+              <div className="space-y-3 rounded-lg border border-[#3e3e3e] bg-[#1e1e1e]/50 p-3">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</p>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1.5">Customer name (required)</label>
+                  <input
+                    type="text"
+                    value={form.customerName}
+                    onChange={(e) => setForm((f) => ({ ...f, customerName: e.target.value }))}
+                    placeholder="e.g. Acme Corp"
+                    className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1.5">Tenant (required)</label>
+                  <input
+                    type="text"
+                    value={form.tenant}
+                    onChange={(e) => setForm((f) => ({ ...f, tenant: e.target.value }))}
+                    placeholder="e.g. acme-prod"
+                    className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-400 mb-1.5">URL</label>
