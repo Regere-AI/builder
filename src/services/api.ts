@@ -188,6 +188,7 @@ export interface LaunchpadConfig {
   environment?: LaunchpadEnvironment
   customerName?: string
   tenant?: string
+  configFolderPath?: string
 }
 
 export interface LaunchpadAddInput {
@@ -196,6 +197,7 @@ export interface LaunchpadAddInput {
   password: string
   tenant: string
   customerName: string
+  configFolderPath: string
   color?: string
   environment?: LaunchpadEnvironment
 }
@@ -205,6 +207,7 @@ export interface LaunchpadUpdateInput {
   email?: string
   password?: string
   tenant?: string
+  configFolderPath?: string
   color?: string
   environment?: LaunchpadEnvironment
   customerName?: string
@@ -230,7 +233,7 @@ function setStored(configs: StoredLaunchpadConfig[]) {
 }
 
 export function launchpadList(): Promise<LaunchpadConfig[]> {
-  const list = getStored().map(({ id, url, email, color, environment, customerName, tenant }) => ({
+  const list = getStored().map(({ id, url, email, color, environment, customerName, tenant, configFolderPath }) => ({
     id,
     url,
     email,
@@ -238,6 +241,7 @@ export function launchpadList(): Promise<LaunchpadConfig[]> {
     environment: environment ?? DEFAULT_LAUNCHPAD_ENVIRONMENT,
     customerName: customerName?.trim() || undefined,
     tenant: tenant?.trim() || undefined,
+    configFolderPath: configFolderPath?.trim() || undefined,
   }))
   return Promise.resolve(list)
 }
@@ -256,16 +260,20 @@ export function launchpadAdd(input: LaunchpadAddInput): Promise<LaunchpadConfig>
   if (!customerName) {
     return Promise.reject(new Error('Customer name is required'))
   }
+  const configFolderPath = input.configFolderPath?.trim()
+  if (!configFolderPath) {
+    return Promise.reject(new Error('Config folder path is required'))
+  }
   const id = typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
     : `lp-${Date.now()}-${Math.random().toString(36).slice(2)}`
   const color = input.color?.trim() || DEFAULT_LAUNCHPAD_COLOR
   const environment = input.environment ?? DEFAULT_LAUNCHPAD_ENVIRONMENT
-  const stored: StoredLaunchpadConfig = { id, url, email, password: input.password, tenant, color, environment, customerName }
+  const stored: StoredLaunchpadConfig = { id, url, email, password: input.password, tenant, configFolderPath, color, environment, customerName }
   const list = getStored()
   list.push(stored)
   setStored(list)
-  return Promise.resolve({ id, url, email, color, environment, customerName, tenant })
+  return Promise.resolve({ id, url, email, color, environment, customerName, tenant, configFolderPath })
 }
 
 export function launchpadUpdate(id: string, input: LaunchpadUpdateInput): Promise<LaunchpadConfig> {
@@ -282,10 +290,12 @@ export function launchpadUpdate(id: string, input: LaunchpadUpdateInput): Promis
   const environment = input.environment ?? current.environment ?? DEFAULT_LAUNCHPAD_ENVIRONMENT
   const customerName = input.customerName !== undefined ? (input.customerName?.trim() || undefined) : current.customerName
   if (!customerName) return Promise.reject(new Error('Customer name is required'))
+  const configFolderPath = input.configFolderPath !== undefined ? (input.configFolderPath?.trim() || undefined) : (current as StoredLaunchpadConfig).configFolderPath
+  if (!configFolderPath) return Promise.reject(new Error('Config folder path is required'))
   if (!url || !email) return Promise.reject(new Error('URL and email are required'))
-  list[idx] = { ...current, id, url, email, password, tenant: tenantValue, color, environment, customerName }
+  list[idx] = { ...current, id, url, email, password, tenant: tenantValue, configFolderPath, color, environment, customerName }
   setStored(list)
-  return Promise.resolve({ id, url, email, color, environment, customerName, tenant: tenantValue })
+  return Promise.resolve({ id, url, email, color, environment, customerName, tenant: tenantValue, configFolderPath })
 }
 
 export function launchpadDelete(id: string): Promise<void> {
@@ -307,6 +317,7 @@ export function launchpadGet(id: string): (LaunchpadConfig & { password: string 
         environment: c.environment ?? DEFAULT_LAUNCHPAD_ENVIRONMENT,
         customerName: c.customerName?.trim() || undefined,
         tenant: c.tenant?.trim() || undefined,
+        configFolderPath: c.configFolderPath?.trim() || undefined,
       }
     : null
 }
