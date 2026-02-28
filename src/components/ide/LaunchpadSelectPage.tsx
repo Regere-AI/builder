@@ -536,7 +536,7 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
                   type="button"
                   variant="outline"
                   onClick={closeDialog}
-                  className="flex-1 border-[#3e3e3e] text-gray-300 hover:bg-[#3e3e3e]"
+                  className="flex-1 border-gray-500 bg-[#3e3e3e]/60 text-gray-100 hover:bg-[#4e4e4e] hover:text-white hover:border-gray-400"
                 >
                   Cancel
                 </Button>

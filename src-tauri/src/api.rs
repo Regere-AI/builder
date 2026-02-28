@@ -433,6 +433,7 @@ pub async fn api_validate_license(data: ValidateLicenseRequest) -> Result<Valida
 }
 
 // ---------- Agent Generate ----------
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateRequest {
@@ -457,6 +458,7 @@ pub struct GenerateResponse {
 
 impl GenerateResponse {
     /// First non-empty text field for display/editor.
+    #[allow(dead_code)]
     pub fn text(&self) -> String {
         self.result
             .as_deref()
@@ -472,7 +474,7 @@ pub async fn api_generate(
     prompt: String,
     stream: bool,
     mode: String,
-    include_steps: bool,
+    _include_steps: bool,
 ) -> Result<GenerateResponse, String> {
     if prompt.trim().is_empty() {
         return Err("Prompt is required".into());
