@@ -379,10 +379,8 @@ export function LeftSidebar({
     }
     try {
       const entries = await appReadDir(rootPath)
-      const skipNames = new Set(['uiConfigs', 'workflows', 'app.manifest.json'])
-      const filtered = entries.filter((e) => !skipNames.has(e.name))
       const rootNodes: TreeNode[] = []
-      for (const e of filtered) {
+      for (const e of entries) {
         const fullPath = pathJoin(rootPath, e.name)
         const node: TreeNode = {
           name: e.name,

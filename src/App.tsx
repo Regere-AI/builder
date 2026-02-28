@@ -8,7 +8,7 @@ import { LaunchpadSelectPage } from './components/ide/LaunchpadSelectPage'
 import { cn } from './lib/utils'
 import { Mail, Lock } from 'lucide-react'
 import type { LaunchpadConfig } from './services/api'
-import { isTauri, getDefaultWorkspaceRoot, ensureAppFolder } from './desktop'
+import { isTauri } from './desktop'
 
 type View = 'signup' | 'signin' | 'otp' | '2fa' | 'license' | 'launchpad' | 'welcome'
 
@@ -19,18 +19,6 @@ function getHostLabel(url: string): string {
   } catch {
     return url.replace(/^https?:\/\//, '').replace(/\/$/, '').slice(0, 32) || 'App'
   }
-}
-
-function slugify(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[/\\]+/g, '-')
-    .replace(/[^a-z0-9-]/g, '')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-  return slug || ''
 }
 
 interface User {
@@ -109,16 +97,12 @@ function App() {
     }
     if (!isTauri()) return
     const displayName = launchpad.customerName?.trim() || getHostLabel(launchpad.url)
-    const appFolderName = slugify(displayName) || launchpad.id || 'app'
-    ;(async () => {
-      try {
-        const workspaceRoot = await getDefaultWorkspaceRoot()
-        const rootPath = await ensureAppFolder(workspaceRoot, appFolderName, displayName)
-        setActiveApp({ rootPath, name: displayName })
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
-      }
-    })()
+    const rootPath = (launchpad.configFolderPath ?? '').trim()
+    if (!rootPath) {
+      setError('Launchpad config folder path is not set')
+      return
+    }
+    setActiveApp({ rootPath, name: displayName })
   }
 
   const handleError = (errorMessage: string) => {
