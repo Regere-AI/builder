@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
-import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search } from 'lucide-react'
+import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search, Package, LayoutDashboard, GitBranch } from 'lucide-react'
 import { Tree } from 'react-arborist'
 import type { NodeRendererProps } from 'react-arborist'
 import type { TreeApi } from 'react-arborist'
@@ -38,6 +38,23 @@ function findNode(nodes: TreeNode[], path: string): TreeNode | null {
     }
   }
   return null
+}
+
+type FileIconComponent = typeof FileJson
+function getFileIcon(name: string): FileIconComponent {
+  const n = name.toLowerCase()
+  if (n.endsWith('.app.manifest.json')) return Package
+  if (n.endsWith('.ui.json')) return LayoutDashboard
+  if (n.endsWith('.workflow.json')) return GitBranch
+  return FileJson
+}
+
+function getFileIconClass(name: string): string {
+  const n = name.toLowerCase()
+  if (n.endsWith('.app.manifest.json')) return 'text-amber-500/90'
+  if (n.endsWith('.ui.json')) return 'text-blue-400/90'
+  if (n.endsWith('.workflow.json')) return 'text-emerald-500/90'
+  return 'text-blue-400/90'
 }
 
 async function loadDirRecursive(dirPath: string): Promise<TreeNode[]> {
@@ -98,7 +115,7 @@ interface SidebarNodeProps extends NodeRendererProps<TreeNode> {
   isPendingNode?: boolean
   pendingNewItem?: { type: 'file' | 'folder'; parentPath: string } | null
   pendingNewItemName?: string
-  pendingInputRef?: React.RefObject<HTMLInputElement>
+  pendingInputRef?: React.RefObject<HTMLInputElement | null>
   onPendingKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
   onPendingBlur?: () => void
   onPendingChange?: (value: string) => void
@@ -178,7 +195,10 @@ function SidebarNode({
         ) : (
           <>
             <span className="w-3.5 shrink-0" />
-            <FileJson className="w-4 h-4 shrink-0 text-blue-400/90" />
+            {(() => {
+              const Icon = getFileIcon(data.name)
+              return <Icon className={cn('w-4 h-4 shrink-0', getFileIconClass(data.name))} />
+            })()}
           </>
         )}
         <input
@@ -226,7 +246,10 @@ function SidebarNode({
       {!data.isDir ? (
         <>
           <span className="w-3.5 shrink-0" />
-          <FileJson className="w-4 h-4 shrink-0 text-blue-400/90" />
+          {(() => {
+            const Icon = getFileIcon(data.name)
+            return <Icon className={cn('w-4 h-4 shrink-0', getFileIconClass(data.name))} />
+          })()}
         </>
       ) : (
         <>
@@ -349,6 +372,12 @@ export function LeftSidebar({
   const [pendingNewItemName, setPendingNewItemName] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [deleteConfirmPending, setDeleteConfirmPending] = useState<string[] | null>(null)
+  const [showCreateFileDialog, setShowCreateFileDialog] = useState(false)
+  const [createParentPathOverride, setCreateParentPathOverride] = useState<string | null>(null)
+  const [createFileKind, setCreateFileKind] = useState<'app' | 'ui' | 'workflow' | null>(null)
+  const [createAppName, setCreateAppName] = useState('')
+  const [createAppUrlPathPrefix, setCreateAppUrlPathPrefix] = useState('')
+  const [createFileName, setCreateFileName] = useState('')
   const pendingInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -431,10 +460,18 @@ export function LeftSidebar({
     return pathDirname(selectedPath)
   }, [activeApp, selectedPath, tree])
 
+  const openCreateFileDialog = useCallback((parentPathOverride?: string) => {
+    setCreateParentPathOverride(parentPathOverride ?? null)
+    setCreateFileKind(null)
+    setCreateAppName('')
+    setCreateAppUrlPathPrefix('')
+    setCreateFileName('')
+    setShowCreateFileDialog(true)
+  }, [])
+
   const handleCreateFile = () => {
     if (!activeApp) return
-    const parentPath = getCreateTargetParentPath()
-    setPendingNewItem({ type: 'file', parentPath })
+    openCreateFileDialog()
   }
 
   const handleCreateFolder = () => {
@@ -473,6 +510,84 @@ export function LeftSidebar({
     setPendingNewItem(null)
     setPendingNewItemName('')
   }, [])
+
+  const closeCreateFileDialog = useCallback(() => {
+    setShowCreateFileDialog(false)
+    setCreateParentPathOverride(null)
+    setCreateFileKind(null)
+    setCreateAppName('')
+    setCreateAppUrlPathPrefix('')
+    setCreateFileName('')
+    setError(null)
+  }, [])
+
+  const getCreateParentPath = useCallback(() => {
+    return createParentPathOverride ?? getCreateTargetParentPath()
+  }, [createParentPathOverride, getCreateTargetParentPath])
+
+  const submitCreateApp = useCallback(async () => {
+    if (!activeApp) return
+    const name = createAppName.trim()
+    const urlPathPrefix = createAppUrlPathPrefix.trim()
+    if (!name) return
+    if (!urlPathPrefix) {
+      setError('URL relative path prefix is required')
+      return
+    }
+    setError(null)
+    const slug = name.toLowerCase().replace(/\s+/g, '-')
+    const basePath = getCreateParentPath()
+    const appDir = pathJoin(basePath, slug)
+    const manifestPath = pathJoin(appDir, `${slug}.app.manifest.json`)
+    const manifestContent = JSON.stringify(
+      { id: slug, name, version: '1.0.0', urlPathPrefix },
+      null,
+      2
+    )
+    try {
+      await appCreateDir(appDir, true)
+      await appWriteTextFile(manifestPath, manifestContent)
+      await loadTree(activeApp.rootPath)
+      closeCreateFileDialog()
+      if (onOpenFile) onOpenFile(manifestPath, manifestContent)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [activeApp, createAppName, createAppUrlPathPrefix, getCreateParentPath, loadTree, onOpenFile, closeCreateFileDialog])
+
+  const submitCreateUi = useCallback(async () => {
+    if (!activeApp) return
+    let name = createFileName.trim().toLowerCase()
+    if (!name) return
+    if (!name.endsWith('.ui.json')) name += '.ui.json'
+    setError(null)
+    const fullPath = pathJoin(getCreateParentPath(), name)
+    try {
+      await appWriteTextFile(fullPath, '{}')
+      await loadTree(activeApp.rootPath)
+      closeCreateFileDialog()
+      if (onOpenFile) onOpenFile(fullPath, '{}')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [activeApp, createFileName, getCreateParentPath, loadTree, onOpenFile, closeCreateFileDialog])
+
+  const submitCreateWorkflow = useCallback(async () => {
+    if (!activeApp) return
+    let name = createFileName.trim().toLowerCase()
+    if (!name) return
+    if (!name.endsWith('.workflow.json')) name += '.workflow.json'
+    setError(null)
+    const fullPath = pathJoin(getCreateParentPath(), name)
+    try {
+      await appWriteTextFile(fullPath, '{}')
+      await loadTree(activeApp.rootPath)
+      closeCreateFileDialog()
+      if (onOpenFile) onOpenFile(fullPath, '{}')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [activeApp, createFileName, getCreateParentPath, loadTree, onOpenFile, closeCreateFileDialog])
 
   const handlePendingKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -709,7 +824,7 @@ export function LeftSidebar({
                       onPendingBlur={handlePendingBlur}
                       onPendingChange={(v) => setPendingNewItemName(v)}
                       onDeleteNodes={(ids) => handleDelete({ ids })}
-                      onNewFile={(parentPath) => setPendingNewItem({ type: 'file', parentPath })}
+                      onNewFile={(parentPath) => openCreateFileDialog(parentPath)}
                       onNewFolder={(parentPath) => setPendingNewItem({ type: 'folder', parentPath })}
                     />
                   )}
@@ -732,6 +847,159 @@ export function LeftSidebar({
           />
         </button>
       </div>
+
+      {/* Create new file type dialog */}
+      {showCreateFileDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={closeCreateFileDialog}
+        >
+          <div
+            className="bg-[#252526] border border-[#3e3e3e] rounded-lg shadow-xl p-4 w-full max-w-sm mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-medium text-gray-200 mb-3">
+              {createFileKind == null ? 'Create new' : createFileKind === 'app' ? 'New app' : createFileKind === 'ui' ? 'New UI config' : 'New workflow'}
+            </h3>
+            {createFileKind == null ? (
+              <div className="flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setCreateFileKind('app')}
+                  className="flex items-center gap-2 px-3 py-2 rounded text-left text-sm text-gray-200 hover:bg-[#2a2d2e]"
+                >
+                  <Package className="w-4 h-4 text-amber-500/90 shrink-0" />
+                  <span>App manifest (*.app.manifest.json)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCreateFileKind('ui')}
+                  className="flex items-center gap-2 px-3 py-2 rounded text-left text-sm text-gray-200 hover:bg-[#2a2d2e]"
+                >
+                  <LayoutDashboard className="w-4 h-4 text-blue-400/90 shrink-0" />
+                  <span>UI config (*.ui.json)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCreateFileKind('workflow')}
+                  className="flex items-center gap-2 px-3 py-2 rounded text-left text-sm text-gray-200 hover:bg-[#2a2d2e]"
+                >
+                  <GitBranch className="w-4 h-4 text-emerald-500/90 shrink-0" />
+                  <span>Workflow (*.workflow.json)</span>
+                </button>
+              </div>
+            ) : createFileKind === 'app' ? (
+              <div className="flex flex-col gap-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">App name</label>
+                  <input
+                    type="text"
+                    value={createAppName}
+                    onChange={(e) => setCreateAppName(e.target.value.toLowerCase())}
+                    placeholder="e.g. My New App"
+                    className="w-full bg-[#3c3c3c] border border-[#3e3e3e] rounded px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">URL relative path prefix (required)</label>
+                  <input
+                    type="text"
+                    value={createAppUrlPathPrefix}
+                    onChange={(e) => setCreateAppUrlPathPrefix(e.target.value)}
+                    placeholder="e.g. /tenant-a/my-app"
+                    className="w-full bg-[#3c3c3c] border border-[#3e3e3e] rounded px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]"
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setCreateFileKind(null)}
+                    className="px-3 py-1.5 text-sm rounded bg-[#3e3e3e] text-gray-200 hover:bg-[#4e4e4e]"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => submitCreateApp()}
+                    className="px-3 py-1.5 text-sm rounded bg-[#094771] text-gray-200 hover:bg-[#0e5a8f]"
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+            ) : createFileKind === 'ui' ? (
+              <div className="flex flex-col gap-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">File name</label>
+                  <input
+                    type="text"
+                    value={createFileName}
+                    onChange={(e) => setCreateFileName(e.target.value.toLowerCase())}
+                    placeholder="e.g. dashboard.ui.json"
+                    className="w-full bg-[#3c3c3c] border border-[#3e3e3e] rounded px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]"
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setCreateFileKind(null)}
+                    className="px-3 py-1.5 text-sm rounded bg-[#3e3e3e] text-gray-200 hover:bg-[#4e4e4e]"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => submitCreateUi()}
+                    className="px-3 py-1.5 text-sm rounded bg-[#094771] text-gray-200 hover:bg-[#0e5a8f]"
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">File name</label>
+                  <input
+                    type="text"
+                    value={createFileName}
+                    onChange={(e) => setCreateFileName(e.target.value.toLowerCase())}
+                    placeholder="e.g. onboarding.workflow.json"
+                    className="w-full bg-[#3c3c3c] border border-[#3e3e3e] rounded px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]"
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setCreateFileKind(null)}
+                    className="px-3 py-1.5 text-sm rounded bg-[#3e3e3e] text-gray-200 hover:bg-[#4e4e4e]"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => submitCreateWorkflow()}
+                    className="px-3 py-1.5 text-sm rounded bg-[#094771] text-gray-200 hover:bg-[#0e5a8f]"
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+            )}
+            {createFileKind == null && (
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={closeCreateFileDialog}
+                  className="px-3 py-1.5 text-sm rounded bg-[#3e3e3e] text-gray-200 hover:bg-[#4e4e4e]"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Delete confirmation modal */}
       {deleteConfirmPending && deleteConfirmPending.length > 0 && (
