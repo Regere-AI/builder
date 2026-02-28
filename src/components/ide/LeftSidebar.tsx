@@ -379,54 +379,26 @@ export function LeftSidebar({
     }
     try {
       const entries = await appReadDir(rootPath)
+      const skipNames = new Set(['uiConfigs', 'workflows', 'app.manifest.json'])
+      const filtered = entries.filter((e) => !skipNames.has(e.name))
       const rootNodes: TreeNode[] = []
-      const uiConfigsPath = pathJoin(rootPath, 'uiConfigs')
-      const workflowsPath = pathJoin(rootPath, 'workflows')
-
-      // Always show app.manifest.json if present
-      const hasManifest = entries.some((e) => !e.isDir && e.name === 'app.manifest.json')
-      if (hasManifest) {
-        rootNodes.push({
-          name: 'app.manifest.json',
-          path: pathJoin(rootPath, 'app.manifest.json'),
-          isDir: false,
-        })
-      }
-
-      // uiConfigs folder (always show), with nested contents so new files in subfolders appear
-      const hasUiConfigs = entries.some((e) => e.isDir && e.name === 'uiConfigs')
-      let uiConfigsChildren: TreeNode[] = []
-      if (hasUiConfigs) {
-        try {
-          uiConfigsChildren = await loadDirRecursive(uiConfigsPath)
-        } catch {
-          // ignore
+      for (const e of filtered) {
+        const fullPath = pathJoin(rootPath, e.name)
+        const node: TreeNode = {
+          name: e.name,
+          path: fullPath,
+          isDir: e.isDir,
         }
-      }
-      rootNodes.push({
-        name: 'uiConfigs',
-        path: uiConfigsPath,
-        isDir: true,
-        children: uiConfigsChildren,
-      })
-
-      // workflows folder (always show), with nested contents
-      const hasWorkflows = entries.some((e) => e.isDir && e.name === 'workflows')
-      let workflowsChildren: TreeNode[] = []
-      if (hasWorkflows) {
-        try {
-          workflowsChildren = await loadDirRecursive(workflowsPath)
-        } catch {
-          // ignore
+        if (e.isDir) {
+          try {
+            node.children = await loadDirRecursive(fullPath)
+          } catch {
+            node.children = []
+          }
         }
+        rootNodes.push(node)
       }
-      rootNodes.push({
-        name: 'workflows',
-        path: workflowsPath,
-        isDir: true,
-        children: workflowsChildren,
-      })
-
+      rootNodes.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
       setTree(rootNodes)
     } catch (e) {
       if (!silent) setError(e instanceof Error ? e.message : String(e))
