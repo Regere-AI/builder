@@ -43,16 +43,17 @@
     "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-slot": "^1.2.4",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2.5.3",
     "@tauri-apps/plugin-process": "^2",
+    "@visual-json/core": "0.2.0",
+    "@visual-json/react": "^0.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "lucide-react": "^0.563.0",
     "monaco-editor": "^0.45.0",
     "react-arborist": "^3.4.3",
-    "tailwind-merge": "^3.4.0",
-    "@visual-json/react": "^0.2.0",
-    "@visual-json/core": "0.2.0"
+    "tailwind-merge": "^3.4.0"
   },
   "overrides": {
     "@visual-json/core": "0.2.0"

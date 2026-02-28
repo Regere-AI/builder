@@ -12,7 +12,8 @@ fn api_base_url() -> String {
 }
 
 fn api_key() -> Result<String, String> {
-    std::env::var("REGERE-API-KEY").map_err(|_| "REGERE-API-KEY not found in environment variables".to_string())
+    std::env::var("REGERE-API-KEY")
+        .map_err(|_| "REGERE-API-KEY not found in environment variables".to_string())
 }
 
 fn agent_url() -> String {
@@ -175,7 +176,13 @@ fn map_reqwest_error(e: reqwest::Error, _fallback: &str) -> String {
 fn extract_error_message(text: &str, fallback: &str) -> String {
     let v = match serde_json::from_str::<serde_json::Value>(text).ok() {
         Some(x) => x,
-        _ => return if text.is_empty() { fallback.into() } else { text.to_string() },
+        _ => {
+            return if text.is_empty() {
+                fallback.into()
+            } else {
+                text.to_string()
+            }
+        }
     };
     if let Some(s) = v.get("error").and_then(|m| m.as_str()) {
         return s.to_string();
@@ -246,7 +253,9 @@ pub async fn api_signup(data: SignupRequest) -> Result<SignupResponse, String> {
         eprintln!("[api_signup] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "Signup failed"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "Signup failed"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "Signup failed"))
 }
 
 #[tauri::command]
@@ -279,7 +288,9 @@ pub async fn api_send_otp(data: SendOTPRequest) -> Result<SendOTPResponse, Strin
         eprintln!("[api_send_otp] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "Failed to send OTP"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "Failed to send OTP"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "Failed to send OTP"))
 }
 
 #[tauri::command]
@@ -314,7 +325,9 @@ pub async fn api_verify_otp(data: VerifyOTPRequest) -> Result<VerifyOTPResponse,
         eprintln!("[api_verify_otp] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "OTP verification failed"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "OTP verification failed"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "OTP verification failed"))
 }
 
 /// Redact a secret for logging (show first 4 chars + "***").
@@ -365,7 +378,9 @@ pub async fn api_signin(data: SigninRequest) -> Result<SigninResponse, String> {
         eprintln!("[api_signin] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "Signin failed"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "Signin failed"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "Signin failed"))
 }
 
 #[tauri::command]
@@ -400,11 +415,15 @@ pub async fn api_verify_2fa(data: Verify2FARequest) -> Result<Verify2FAResponse,
         eprintln!("[api_verify_2fa] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "2FA verification failed"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "2FA verification failed"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "2FA verification failed"))
 }
 
 #[tauri::command]
-pub async fn api_validate_license(data: ValidateLicenseRequest) -> Result<ValidateLicenseResponse, String> {
+pub async fn api_validate_license(
+    data: ValidateLicenseRequest,
+) -> Result<ValidateLicenseResponse, String> {
     if data.license_key.trim().is_empty() {
         return Err("License key is required".into());
     }
@@ -429,7 +448,9 @@ pub async fn api_validate_license(data: ValidateLicenseRequest) -> Result<Valida
         eprintln!("[api_validate_license] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "License validation failed"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "License validation failed"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "License validation failed"))
 }
 
 // ---------- Agent Generate ----------
@@ -511,11 +532,16 @@ pub async fn api_generate(
         .map_err(|e| map_reqwest_error(e, "Generate failed"))?;
 
     #[cfg(debug_assertions)]
-    eprintln!("[api_generate] raw response: {}", serde_json::to_string(&parsed).unwrap_or_default());
+    eprintln!(
+        "[api_generate] raw response: {}",
+        serde_json::to_string(&parsed).unwrap_or_default()
+    );
 
     // Helper: get first non-empty string from a value using common keys (order matters).
     fn extract_text(v: &serde_json::Value) -> Option<String> {
-        let keys = ["result", "content", "code", "output", "response", "text", "message", "body"];
+        let keys = [
+            "result", "content", "code", "output", "response", "text", "message", "body",
+        ];
         for key in keys {
             if let Some(s) = v.get(key).and_then(|x| x.as_str()) {
                 if !s.trim().is_empty() {
@@ -532,7 +558,11 @@ pub async fn api_generate(
         (Some(s.clone()), None, None)
     } else if let Some(ref d) = data {
         let from_data = if let Some(s) = d.as_str() {
-            if s.trim().is_empty() { None } else { Some(s.to_string()) }
+            if s.trim().is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
         } else {
             extract_text(d)
         };
