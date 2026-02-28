@@ -8,9 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "NODE_OPTIONS='--disable-warning=DEP0147' tauri dev",
     "tauri:build": "tauri build",
-    "build:mac": "node -e \"if(process.platform!=='darwin'){console.error('Build for macOS must be run on macOS');process.exit(1)}\" && tauri build",
+    "build:mac": "export NODE_OPTIONS='--disable-warning=DEP0147' && node -e \"if(process.platform!=='darwin'){console.error('Build for macOS must be run on macOS');process.exit(1)}\" && tauri build",
     "build:win": "node -e \"if(process.platform!=='win32'){console.error('Build for Windows must be run on Windows');process.exit(1)}\" && tauri build"
   },
   "keywords": [
