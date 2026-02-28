@@ -50,6 +50,11 @@
     "lucide-react": "^0.563.0",
     "monaco-editor": "^0.45.0",
     "react-arborist": "^3.4.3",
-    "tailwind-merge": "^3.4.0"
+    "tailwind-merge": "^3.4.0",
+    "@visual-json/react": "^0.2.0",
+    "@visual-json/core": "0.2.0"
+  },
+  "overrides": {
+    "@visual-json/core": "0.2.0"
   }
 }

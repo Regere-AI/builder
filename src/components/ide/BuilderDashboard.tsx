@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Folder, Code, Layout } from 'lucide-react'
 import { Button } from '../ui/button'
 import { EditorView } from './EditorView'
+import { JsonSplitView } from './JsonSplitView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
 import { LayoutRenderer, defaultLayoutRegistry, type LayoutNode } from './LayoutRenderer'
 import { openFile as desktopOpenFile, saveFile as desktopSaveFile, appWriteTextFile, isTauri } from '@/desktop'
@@ -594,6 +595,13 @@ export function BuilderDashboard({
             <div className="flex-1 flex items-center justify-center p-8 text-gray-400">
               Invalid layout JSON. Ensure the file has a root object with a <code className="bg-[#3e3e3e] px-1 rounded">type</code> field.
             </div>
+          ) : isJsonFile ? (
+            <JsonSplitView
+              file={activeFile}
+              onChange={handleFileChange}
+              onSave={handleSave}
+              onRegisterGetSelection={(getter) => { getEditorSelectionRef.current = getter }}
+            />
           ) : (
             <EditorView
               file={activeFile}
