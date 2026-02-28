@@ -599,6 +599,28 @@ export function BuilderDashboard({
   const layoutNode = activeFile && isJsonFile ? parseLayoutJson(activeFile.content) : null
   const showLayoutPreview = showPreview && isJsonFile && layoutNode
 
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
+  const configShortcut = isMac ? '⌘1' : 'Ctrl+1'
+  const previewShortcut = isMac ? '⌘2' : 'Ctrl+2'
+
+  // Cmd+1 / Ctrl+1 → Configuration, Cmd+2 / Ctrl+2 → Preview (when JSON file is active)
+  useEffect(() => {
+    if (!activeFile || !isJsonFile) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod || e.altKey || e.shiftKey) return
+      if (e.key === '1') {
+        e.preventDefault()
+        setShowPreview(false)
+      } else if (e.key === '2') {
+        e.preventDefault()
+        setShowPreview(true)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [activeFile, isJsonFile])
+
   return (
     <div className="flex-1 bg-[#1e1e1e] flex flex-col overflow-hidden">
       {/* Editor Tabs */}
@@ -619,18 +641,22 @@ export function BuilderDashboard({
             size="sm"
             className={`text-sm ${!showPreview ? 'bg-[#3e3e3e] text-white' : 'text-gray-400 hover:text-gray-200'}`}
             onClick={() => setShowPreview(false)}
+            title={`Configuration (${configShortcut})`}
           >
             <Code className="w-4 h-4 mr-1" />
             Configuration
+            <span className="ml-1.5 opacity-60 text-xs font-normal">{configShortcut}</span>
           </Button>
           <Button
             variant="ghost"
             size="sm"
             className={`text-sm ${showPreview ? 'bg-[#3e3e3e] text-white' : 'text-gray-400 hover:text-gray-200'}`}
             onClick={() => setShowPreview(true)}
+            title={`Preview (${previewShortcut})`}
           >
             <Layout className="w-4 h-4 mr-1" />
             Preview
+            <span className="ml-1.5 opacity-60 text-xs font-normal">{previewShortcut}</span>
           </Button>
         </div>
       )}

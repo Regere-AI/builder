@@ -851,147 +851,184 @@ export function LeftSidebar({
       {/* Create new file type dialog */}
       {showCreateFileDialog && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity"
           onClick={closeCreateFileDialog}
         >
           <div
-            className="bg-[#252526] border border-[#3e3e3e] rounded-lg shadow-xl p-4 w-full max-w-sm mx-4"
+            className="w-full max-w-md mx-4 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-[#2d2d30] to-[#1e1e21] shadow-2xl shadow-black/40 ring-1 ring-white/5"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-sm font-medium text-gray-200 mb-3">
-              {createFileKind == null ? 'Create new' : createFileKind === 'app' ? 'New app' : createFileKind === 'ui' ? 'New UI config' : 'New workflow'}
-            </h3>
-            {createFileKind == null ? (
-              <div className="flex flex-col gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setCreateFileKind('app')}
-                  className="flex items-center gap-2 px-3 py-2 rounded text-left text-sm text-gray-200 hover:bg-[#2a2d2e]"
-                >
-                  <Package className="w-4 h-4 text-amber-500/90 shrink-0" />
-                  <span>App manifest (*.app.manifest.json)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCreateFileKind('ui')}
-                  className="flex items-center gap-2 px-3 py-2 rounded text-left text-sm text-gray-200 hover:bg-[#2a2d2e]"
-                >
-                  <LayoutDashboard className="w-4 h-4 text-blue-400/90 shrink-0" />
-                  <span>UI config (*.ui.json)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCreateFileKind('workflow')}
-                  className="flex items-center gap-2 px-3 py-2 rounded text-left text-sm text-gray-200 hover:bg-[#2a2d2e]"
-                >
-                  <GitBranch className="w-4 h-4 text-emerald-500/90 shrink-0" />
-                  <span>Workflow (*.workflow.json)</span>
-                </button>
-              </div>
-            ) : createFileKind === 'app' ? (
-              <div className="flex flex-col gap-3">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">App name</label>
-                  <input
-                    type="text"
-                    value={createAppName}
-                    onChange={(e) => setCreateAppName(e.target.value.toLowerCase())}
-                    placeholder="e.g. My New App"
-                    className="w-full bg-[#3c3c3c] border border-[#3e3e3e] rounded px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">URL relative path prefix (required)</label>
-                  <input
-                    type="text"
-                    value={createAppUrlPathPrefix}
-                    onChange={(e) => setCreateAppUrlPathPrefix(e.target.value)}
-                    placeholder="e.g. /tenant-a/my-app"
-                    className="w-full bg-[#3c3c3c] border border-[#3e3e3e] rounded px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]"
-                  />
-                </div>
-                <div className="flex gap-2 justify-end">
+            {/* Header */}
+            <div className="px-6 pt-6 pb-4 border-b border-white/5">
+              <h2 className="text-lg font-semibold tracking-tight text-white">
+                {createFileKind == null
+                  ? 'What will you create?'
+                  : createFileKind === 'app'
+                    ? 'New app'
+                    : createFileKind === 'ui'
+                      ? 'New UI config'
+                      : 'New workflow'}
+              </h2>
+              <p className="mt-1 text-sm text-gray-400">
+                {createFileKind == null
+                  ? 'Choose a configuration type — each shapes your project in a different way.'
+                  : createFileKind === 'app'
+                    ? 'Give your app an identity and a place on the web.'
+                    : createFileKind === 'ui'
+                      ? 'Define a new screen or layout configuration.'
+                      : 'Add a workflow to orchestrate steps and automation.'}
+              </p>
+            </div>
+
+            <div className="p-6">
+              {createFileKind == null ? (
+                <div className="space-y-2">
                   <button
                     type="button"
-                    onClick={() => setCreateFileKind(null)}
-                    className="px-3 py-1.5 text-sm rounded bg-[#3e3e3e] text-gray-200 hover:bg-[#4e4e4e]"
+                    onClick={() => setCreateFileKind('app')}
+                    className="group flex w-full items-center gap-4 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3.5 text-left transition-all hover:border-amber-500/40 hover:bg-amber-500/10 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
                   >
-                    Back
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/20 transition-colors group-hover:bg-amber-500/25">
+                      <Package className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span className="block font-medium text-gray-100">App manifest</span>
+                      <span className="block text-xs text-gray-500">*.app.manifest.json — Your app’s identity, URL path, and metadata.</span>
+                    </div>
                   </button>
                   <button
                     type="button"
-                    onClick={() => submitCreateApp()}
-                    className="px-3 py-1.5 text-sm rounded bg-[#094771] text-gray-200 hover:bg-[#0e5a8f]"
+                    onClick={() => setCreateFileKind('ui')}
+                    className="group flex w-full items-center gap-4 rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3.5 text-left transition-all hover:border-blue-500/40 hover:bg-blue-500/10 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
                   >
-                    Create
-                  </button>
-                </div>
-              </div>
-            ) : createFileKind === 'ui' ? (
-              <div className="flex flex-col gap-3">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">File name</label>
-                  <input
-                    type="text"
-                    value={createFileName}
-                    onChange={(e) => setCreateFileName(e.target.value.toLowerCase())}
-                    placeholder="e.g. dashboard.ui.json"
-                    className="w-full bg-[#3c3c3c] border border-[#3e3e3e] rounded px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]"
-                  />
-                </div>
-                <div className="flex gap-2 justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setCreateFileKind(null)}
-                    className="px-3 py-1.5 text-sm rounded bg-[#3e3e3e] text-gray-200 hover:bg-[#4e4e4e]"
-                  >
-                    Back
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/20 transition-colors group-hover:bg-blue-500/25">
+                      <LayoutDashboard className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span className="block font-medium text-gray-100">UI config</span>
+                      <span className="block text-xs text-gray-500">*.ui.json — Screens, layouts, and view structure.</span>
+                    </div>
                   </button>
                   <button
                     type="button"
-                    onClick={() => submitCreateUi()}
-                    className="px-3 py-1.5 text-sm rounded bg-[#094771] text-gray-200 hover:bg-[#0e5a8f]"
+                    onClick={() => setCreateFileKind('workflow')}
+                    className="group flex w-full items-center gap-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3.5 text-left transition-all hover:border-emerald-500/40 hover:bg-emerald-500/10 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                   >
-                    Create
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/20 transition-colors group-hover:bg-emerald-500/25">
+                      <GitBranch className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span className="block font-medium text-gray-100">Workflow</span>
+                      <span className="block text-xs text-gray-500">*.workflow.json — Steps, flows, and automation.</span>
+                    </div>
                   </button>
                 </div>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">File name</label>
-                  <input
-                    type="text"
-                    value={createFileName}
-                    onChange={(e) => setCreateFileName(e.target.value.toLowerCase())}
-                    placeholder="e.g. onboarding.workflow.json"
-                    className="w-full bg-[#3c3c3c] border border-[#3e3e3e] rounded px-2 py-1.5 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]"
-                  />
+              ) : createFileKind === 'app' ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">App name</label>
+                    <input
+                      type="text"
+                      value={createAppName}
+                      onChange={(e) => setCreateAppName(e.target.value.toLowerCase())}
+                      placeholder="e.g. my new app"
+                      className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-500 outline-none transition-colors focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">URL relative path prefix <span className="text-amber-400/90">(required)</span></label>
+                    <input
+                      type="text"
+                      value={createAppUrlPathPrefix}
+                      onChange={(e) => setCreateAppUrlPathPrefix(e.target.value)}
+                      placeholder="e.g. /tenant-a/my-app"
+                      className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-500 outline-none transition-colors focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/20"
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setCreateFileKind(null)}
+                      className="rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-gray-100"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => submitCreateApp()}
+                      className="ml-auto rounded-lg bg-amber-500/90 px-4 py-2 text-sm font-medium text-black transition-colors hover:bg-amber-400"
+                    >
+                      Create app
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-2 justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setCreateFileKind(null)}
-                    className="px-3 py-1.5 text-sm rounded bg-[#3e3e3e] text-gray-200 hover:bg-[#4e4e4e]"
-                  >
-                    Back
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => submitCreateWorkflow()}
-                    className="px-3 py-1.5 text-sm rounded bg-[#094771] text-gray-200 hover:bg-[#0e5a8f]"
-                  >
-                    Create
-                  </button>
+              ) : createFileKind === 'ui' ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">File name</label>
+                    <input
+                      type="text"
+                      value={createFileName}
+                      onChange={(e) => setCreateFileName(e.target.value.toLowerCase())}
+                      placeholder="e.g. dashboard.ui.json"
+                      className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-500 outline-none transition-colors focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setCreateFileKind(null)}
+                      className="rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-gray-100"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => submitCreateUi()}
+                      className="ml-auto rounded-lg bg-blue-500/90 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-400"
+                    >
+                      Create
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">File name</label>
+                    <input
+                      type="text"
+                      value={createFileName}
+                      onChange={(e) => setCreateFileName(e.target.value.toLowerCase())}
+                      placeholder="e.g. onboarding.workflow.json"
+                      className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-500 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20"
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setCreateFileKind(null)}
+                      className="rounded-lg border border-white/10 px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:bg-white/5 hover:text-gray-100"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => submitCreateWorkflow()}
+                      className="ml-auto rounded-lg bg-emerald-500/90 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-400"
+                    >
+                      Create
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {createFileKind == null && (
-              <div className="mt-3 flex justify-end">
+              <div className="border-t border-white/5 px-6 py-3 flex justify-end bg-black/10">
                 <button
                   type="button"
                   onClick={closeCreateFileDialog}
-                  className="px-3 py-1.5 text-sm rounded bg-[#3e3e3e] text-gray-200 hover:bg-[#4e4e4e]"
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-gray-400 transition-colors hover:bg-white/5 hover:text-gray-200"
                 >
                   Cancel
                 </button>
