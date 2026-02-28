@@ -1,10 +1,26 @@
 import { useState, useEffect, useRef } from 'react'
-import { Folder } from 'lucide-react'
+import { Folder, Code, Layout } from 'lucide-react'
 import { Button } from '../ui/button'
 import { EditorView } from './EditorView'
+import { JsonSplitView } from './JsonSplitView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
-import { openFile as desktopOpenFile, saveFile as desktopSaveFile, isTauri } from '@/desktop'
-import { Menu, Submenu, MenuItem, PredefinedMenuItem } from '@tauri-apps/api/menu'
+import { LayoutRenderer, defaultLayoutRegistry, type LayoutNode } from './LayoutRenderer'
+import { openFile as desktopOpenFile, saveFile as desktopSaveFile, appWriteTextFile, isTauri } from '@/desktop'
+import type { ActiveApp } from './IDELayout'
+import type { AgentResponsePayload } from './ChatPanel'
+import type { GetEditorSelection, EditorSelectionPayload } from './EditorView'
+
+function parseLayoutJson(content: string): LayoutNode | null {
+  try {
+    const node = JSON.parse(content)
+    if (node && typeof node === 'object' && node.type) return node as LayoutNode
+    return null
+  } catch {
+    return null
+  }
+}
+import { Menu, Submenu, MenuItem, PredefinedMenuItem, CheckMenuItem } from '@tauri-apps/api/menu'
+import { listen } from '@tauri-apps/api/event'
 import { exit } from '@tauri-apps/plugin-process'
 
 interface BuilderDashboardProps {
@@ -13,13 +29,107 @@ interface BuilderDashboardProps {
     lastName: string
     email: string
   }
-  activeProject?: any
-  agentResponse?: any
+  activeProject?: unknown
+  activeApp?: ActiveApp | null
+  registerOpenFileFromSidebar?: (handler: (path: string, content: string) => void) => void
+  registerFilesDeletedFromSidebar?: (handler: (paths: string[]) => void) => void
+  onAppFilesChanged?: () => void
+  onAgentResponseProcessed?: () => void
+  agentResponse?: AgentResponsePayload
+  /** When user adds selection to chat (e.g. Ctrl+L), open panel and set context. */
+  onAddSelectionToChat?: (payload: EditorSelectionPayload) => void
 }
 
-export function BuilderDashboard({ user, activeProject, agentResponse }: BuilderDashboardProps) {
+export function BuilderDashboard({
+  user,
+  activeProject,
+  activeApp,
+  registerOpenFileFromSidebar,
+  registerFilesDeletedFromSidebar,
+  onAppFilesChanged,
+  onAgentResponseProcessed,
+  agentResponse,
+  onAddSelectionToChat,
+}: BuilderDashboardProps) {
+  const AUTO_SAVE_KEY = 'builder-auto-save'
   const [openFiles, setOpenFiles] = useState<EditorFile[]>([])
   const [activeFile, setActiveFile] = useState<EditorFile | null>(null)
+  const [showPreview, setShowPreview] = useState(false)
+  const [autoSave, setAutoSave] = useState(() => {
+    try {
+      return localStorage.getItem(AUTO_SAVE_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+  const openFilesRef = useRef<EditorFile[]>([])
+  openFilesRef.current = openFiles
+  const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingAutoSaveRef = useRef<{ path: string; content: string } | null>(null)
+  const getEditorSelectionRef = useRef<GetEditorSelection>(() => null)
+  const onAddSelectionToChatRef = useRef(onAddSelectionToChat)
+  onAddSelectionToChatRef.current = onAddSelectionToChat
+
+  useEffect(() => {
+    if (!registerOpenFileFromSidebar) return
+    const handler = (path: string, content: string) => {
+      if (path == null || typeof path !== 'string') return
+      const existing = openFilesRef.current.find((f) => f.path === path)
+      if (existing) {
+        setActiveFile(existing)
+        return
+      }
+      const name = path.split(/[\\/]/).pop() || path
+      const newFile: EditorFile = { path, name, content, isModified: false }
+      setOpenFiles((prev) => [...prev, newFile])
+      setActiveFile(newFile)
+    }
+    registerOpenFileFromSidebar(handler)
+    return () => registerOpenFileFromSidebar(() => {})
+  }, [registerOpenFileFromSidebar])
+
+  // Clear auto-save timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current)
+    }
+  }, [])
+
+  // Close tabs when files/folders are deleted from the sidebar
+  useEffect(() => {
+    if (!registerFilesDeletedFromSidebar) return
+    const handler = (paths: string[]) => {
+      if (!Array.isArray(paths) || paths.length === 0) return
+      const isDeletedPath = (filePath: string) =>
+        paths.some((p) => filePath === p || filePath.startsWith(p.endsWith('/') ? p : `${p}/`))
+
+      setOpenFiles((prev) => prev.filter((f) => !isDeletedPath(f.path)))
+
+      setActiveFile((prev) => {
+        if (!prev) return prev
+        if (!isDeletedPath(prev.path)) return prev
+        const remaining = openFilesRef.current.filter((f) => !isDeletedPath(f.path))
+        return remaining.length > 0 ? remaining[remaining.length - 1] : null
+      })
+    }
+    registerFilesDeletedFromSidebar(handler)
+    return () => registerFilesDeletedFromSidebar(() => {})
+  }, [registerFilesDeletedFromSidebar])
+
+  // Tauri: handle app:add-selection-to-chat (Ctrl+L / Cmd+L global shortcut)
+  useEffect(() => {
+    if (!isTauri() || !onAddSelectionToChat) return
+    let unlisten: (() => void) | undefined
+    listen('app:add-selection-to-chat', () => {
+      let payload = getEditorSelectionRef.current()
+      if (!payload) {
+        const docText = window.getSelection()?.toString()?.trim() ?? ''
+        if (docText) payload = { filePath: '', startLine: 0, endLine: 0, text: docText }
+      }
+      if (payload) onAddSelectionToChatRef.current?.(payload)
+    }).then((fn) => { unlisten = fn })
+    return () => { unlisten?.() }
+  }, [onAddSelectionToChat])
 
   const handleOpenProject = () => {
     console.log('Open project clicked')
@@ -28,7 +138,8 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
 
   const handleOpenFile = async () => {
     if (!isTauri()) {
-      console.error('Desktop API not available')
+      console.warn('Desktop API not available — run the app with "npm run tauri dev" to use Open File.')
+      window.alert('Open File is only available in the desktop app.\n\nRun: npm run tauri dev')
       return
     }
     try {
@@ -105,6 +216,31 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
     setActiveFile((prev) =>
       prev ? { ...prev, content: value, isModified: true } : null
     )
+
+    // Auto-save: debounced write to disk when enabled (only for files with a real path)
+    if (autoSave && isTauri() && (activeFile.path.includes('/') || activeFile.path.includes('\\'))) {
+      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current)
+      pendingAutoSaveRef.current = { path: activeFile.path, content: value }
+      autoSaveTimeoutRef.current = setTimeout(async () => {
+        const pending = pendingAutoSaveRef.current
+        autoSaveTimeoutRef.current = null
+        pendingAutoSaveRef.current = null
+        if (!pending) return
+        try {
+          await appWriteTextFile(pending.path, pending.content)
+          setOpenFiles((prev) =>
+            prev.map((f) =>
+              f.path === pending.path ? { ...f, isModified: false } : f
+            )
+          )
+          setActiveFile((prev) =>
+            prev?.path === pending.path ? { ...prev, isModified: false } : prev
+          )
+        } catch (e) {
+          console.error('Auto-save failed:', e)
+        }
+      }, 800)
+    }
   }
 
   const handleSave = async () => {
@@ -162,38 +298,89 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
   const handlersRef = useRef({ handleNewFile, handleOpenFile, handleSave, handleSaveAs })
   handlersRef.current = { handleNewFile, handleOpenFile, handleSave, handleSaveAs }
 
-  // Build Tauri app menu (File, Edit, View, Window, Help)
+  // Debounce menu/shortcut handlers so duplicate events (e.g. shortcut + menu) only run once
+  const menuLastCallRef = useRef<Record<string, number>>({})
+  const MENU_DEBOUNCE_MS = 400
+  const runOnce = (key: string, fn: () => void) => {
+    const now = Date.now()
+    if (now - (menuLastCallRef.current[key] ?? 0) < MENU_DEBOUNCE_MS) return
+    menuLastCallRef.current[key] = now
+    fn()
+  }
+
+  // Subscribe to global shortcut events from backend (once; cleanup clears so no double-firing)
+  const shortcutUnlistensRef = useRef<Array<() => void>>([])
+  const effectIdRef = useRef(0)
+  useEffect(() => {
+    if (!isTauri()) return
+    effectIdRef.current += 1
+    const thisId = effectIdRef.current
+    shortcutUnlistensRef.current.forEach((fn) => fn())
+    shortcutUnlistensRef.current = []
+    Promise.all([
+      listen('menu:new-file', () => runOnce('new-file', () => handlersRef.current.handleNewFile())),
+      listen('menu:open-file', () => runOnce('open-file', () => handlersRef.current.handleOpenFile())),
+      listen('menu:save', () => runOnce('save', () => handlersRef.current.handleSave())),
+      listen('menu:save-as', () => runOnce('save-as', () => handlersRef.current.handleSaveAs())),
+    ]).then((unlistenFns) => {
+      if (thisId !== effectIdRef.current) {
+        unlistenFns.forEach((fn) => fn())
+        return
+      }
+      shortcutUnlistensRef.current = unlistenFns
+    })
+    return () => {
+      shortcutUnlistensRef.current.forEach((fn) => fn())
+      shortcutUnlistensRef.current = []
+    }
+  }, [])
+
+  // Build Tauri app menu (File, Edit, View, Window, Help + Selection, Go, Run, Terminal)
   useEffect(() => {
     if (!isTauri()) return
     let mounted = true
     const setupMenu = async () => {
       const isMac = navigator.platform.toLowerCase().includes('mac')
 
+      // No accelerators on New/Open/Save/Save As: global shortcuts in lib.rs handle keys (emit menu:* events).
+      // Menu actions use runOnce so shortcut+menu double-fire only runs once.
       const newItem = await MenuItem.new({
         id: 'new',
         text: 'New',
-        accelerator: 'CmdOrCtrl+N',
-        action: () => handlersRef.current.handleNewFile(),
+        action: () => runOnce('new-file', () => handlersRef.current.handleNewFile()),
       })
       const openItem = await MenuItem.new({
         id: 'open',
         text: 'Open',
-        accelerator: 'CmdOrCtrl+O',
-        action: () => handlersRef.current.handleOpenFile(),
+        action: () => runOnce('open-file', () => handlersRef.current.handleOpenFile()),
       })
       const saveItem = await MenuItem.new({
         id: 'save',
         text: 'Save',
-        accelerator: 'CmdOrCtrl+S',
-        action: () => handlersRef.current.handleSave(),
+        action: () => runOnce('save', () => handlersRef.current.handleSave()),
       })
       const saveAsItem = await MenuItem.new({
         id: 'save-as',
         text: 'Save As...',
-        accelerator: 'CmdOrCtrl+Shift+S',
-        action: () => handlersRef.current.handleSaveAs(),
+        action: () => runOnce('save-as', () => handlersRef.current.handleSaveAs()),
       })
       const separator = await PredefinedMenuItem.new({ item: 'Separator' })
+      const autoSaveItem = await CheckMenuItem.new({
+        id: 'auto-save',
+        text: 'Auto Save',
+        checked: autoSave,
+        action: () => {
+          setAutoSave((prev) => {
+            const next = !prev
+            try {
+              localStorage.setItem(AUTO_SAVE_KEY, next ? 'true' : 'false')
+            } catch {
+              // ignore
+            }
+            return next
+          })
+        },
+      })
       const quitItem = await MenuItem.new({
         id: 'quit',
         text: isMac ? 'Quit' : 'Exit',
@@ -203,7 +390,7 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
 
       const fileSubmenu = await Submenu.new({
         text: 'File',
-        items: [newItem, openItem, separator, saveItem, saveAsItem, separator, quitItem],
+        items: [newItem, openItem, separator, saveItem, saveAsItem, separator, autoSaveItem, separator, quitItem],
       })
 
       const undoItem = await PredefinedMenuItem.new({ item: 'Undo' })
@@ -214,26 +401,114 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
       const pasteItem = await PredefinedMenuItem.new({ item: 'Paste' })
       const selectAllItem = await PredefinedMenuItem.new({ item: 'SelectAll' })
       const editSep2 = await PredefinedMenuItem.new({ item: 'Separator' })
-      const deleteItem = await PredefinedMenuItem.new({ item: 'Delete' })
+      const deleteItem = await MenuItem.new({
+        id: 'delete',
+        text: 'Delete',
+        action: () => document.execCommand('delete', false),
+      })
       const editSubmenu = await Submenu.new({
         text: 'Edit',
         items: [undoItem, redoItem, editSep1, cutItem, copyItem, pasteItem, selectAllItem, editSep2, deleteItem],
       })
 
-      const reloadItem = await PredefinedMenuItem.new({ item: 'Reload' })
-      const devToolsItem = await PredefinedMenuItem.new({ item: 'ToggleDevTools' })
+      const selectionSelectAll = await PredefinedMenuItem.new({ item: 'SelectAll' })
+      const selectionSubmenu = await Submenu.new({
+        text: 'Selection',
+        items: [selectionSelectAll],
+      })
+
+      const goToLineItem = await MenuItem.new({
+        id: 'go-to-line',
+        text: 'Go to Line...',
+        accelerator: 'CmdOrCtrl+G',
+        action: () => console.log('Go to Line'),
+      })
+      const goToFileItem = await MenuItem.new({
+        id: 'go-to-file',
+        text: 'Go to File...',
+        accelerator: 'CmdOrCtrl+P',
+        action: () => console.log('Go to File'),
+      })
+      const goSubmenu = await Submenu.new({
+        text: 'Go',
+        items: [goToLineItem, goToFileItem],
+      })
+
+      const runItem = await MenuItem.new({
+        id: 'run',
+        text: 'Run',
+        accelerator: 'F5',
+        action: () => console.log('Run'),
+      })
+      const debugItem = await MenuItem.new({
+        id: 'debug',
+        text: 'Debug',
+        accelerator: 'F10',
+        action: () => console.log('Debug'),
+      })
+      const runSubmenu = await Submenu.new({
+        text: 'Run',
+        items: [runItem, debugItem],
+      })
+
+      const newTerminalItem = await MenuItem.new({
+        id: 'new-terminal',
+        text: 'New Terminal',
+        accelerator: 'Ctrl+`',
+        action: () => console.log('New Terminal'),
+      })
+      const toggleTerminalItem = await MenuItem.new({
+        id: 'toggle-terminal',
+        text: 'Toggle Terminal',
+        accelerator: 'Ctrl+`',
+        action: () => console.log('Toggle Terminal'),
+      })
+      const terminalSubmenu = await Submenu.new({
+        text: 'Terminal',
+        items: [newTerminalItem, toggleTerminalItem],
+      })
+
+      const reloadItem = await MenuItem.new({
+        id: 'reload',
+        text: 'Reload',
+        accelerator: 'CmdOrCtrl+R',
+        action: () => window.location.reload(),
+      })
+      const devToolsItem = await MenuItem.new({
+        id: 'toggle-devtools',
+        text: 'Toggle Developer Tools',
+        action: () => {
+          // Tauri handles this via native menu; custom item for consistency
+          console.log('Toggle DevTools')
+        },
+      })
       const sep3 = await PredefinedMenuItem.new({ item: 'Separator' })
-      const zoomInItem = await PredefinedMenuItem.new({ item: 'ZoomIn' })
-      const zoomOutItem = await PredefinedMenuItem.new({ item: 'ZoomOut' })
-      const resetZoomItem = await PredefinedMenuItem.new({ item: 'ResetZoom' })
-      const fullscreenItem = await PredefinedMenuItem.new({ item: 'ToggleFullscreen' })
+      const zoomInItem = await MenuItem.new({
+        id: 'zoom-in',
+        text: 'Zoom In',
+        accelerator: 'CmdOrCtrl+Plus',
+        action: () => {},
+      })
+      const zoomOutItem = await MenuItem.new({
+        id: 'zoom-out',
+        text: 'Zoom Out',
+        accelerator: 'CmdOrCtrl+-',
+        action: () => {},
+      })
+      const resetZoomItem = await MenuItem.new({
+        id: 'reset-zoom',
+        text: 'Reset Zoom',
+        accelerator: 'CmdOrCtrl+0',
+        action: () => {},
+      })
+      const fullscreenItem = await PredefinedMenuItem.new({ item: 'Fullscreen' })
       const viewSubmenu = await Submenu.new({
         text: 'View',
         items: [reloadItem, devToolsItem, sep3, resetZoomItem, zoomInItem, zoomOutItem, sep3, fullscreenItem],
       })
 
       const minimizeItem = await PredefinedMenuItem.new({ item: 'Minimize' })
-      const closeItem = await PredefinedMenuItem.new({ item: 'Close' })
+      const closeItem = await PredefinedMenuItem.new({ item: 'CloseWindow' })
       const windowSubmenu = await Submenu.new({
         text: 'Window',
         items: [minimizeItem, closeItem],
@@ -252,7 +527,9 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
         items: [aboutItem],
       })
 
-      const items = isMac ? [fileSubmenu, editSubmenu, viewSubmenu, windowSubmenu, helpSubmenu] : [fileSubmenu, editSubmenu, viewSubmenu, windowSubmenu, helpSubmenu]
+      const items = isMac
+        ? [fileSubmenu, editSubmenu, selectionSubmenu, viewSubmenu, goSubmenu, runSubmenu, terminalSubmenu, windowSubmenu, helpSubmenu]
+        : [fileSubmenu, editSubmenu, selectionSubmenu, viewSubmenu, goSubmenu, runSubmenu, terminalSubmenu, windowSubmenu, helpSubmenu]
       const menu = await Menu.new({ items })
       if (mounted) await menu.setAsAppMenu()
     }
@@ -260,41 +537,89 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
     return () => {
       mounted = false
     }
-  }, [])
+  }, [autoSave])
 
-  // Handle agent responses - open files from agent
+  // Handle agent responses - open files from agent (write to uiConfigs when activeApp is set)
   useEffect(() => {
     if (!agentResponse) return
 
     // If agent response contains code to create/edit files
     if (agentResponse.type === 'code' && agentResponse.content?.code) {
-      const filePath = agentResponse.content.filePath || 'untitled.ts'
-      const fileName = filePath.split(/[\\/]/).pop() || filePath
-      
-      const newFile: EditorFile = {
-        path: filePath,
-        name: fileName,
-        content: agentResponse.content.code,
-        isModified: true,
-      }
+      const relativePath = agentResponse.content.filePath || 'untitled.ts'
+      const pathJoin = (...parts: string[]) =>
+        parts.filter(Boolean).join('/').replace(/\\/g, '/')
+      const resolvedPath = activeApp
+        ? pathJoin(activeApp.rootPath, relativePath)
+        : relativePath
 
-      // Check if file already exists
-      const existing = openFiles.find((f) => f.path === filePath)
-      if (existing) {
-        // Update existing file
-        setOpenFiles((prev) =>
-          prev.map((f) =>
-            f.path === filePath ? { ...f, content: agentResponse.content.code, isModified: true } : f
+      const writeAndOpen = async () => {
+        if (activeApp && isTauri()) {
+          try {
+            await appWriteTextFile(resolvedPath, agentResponse.content.code)
+            onAppFilesChanged?.()
+          } catch (e) {
+            console.error('Failed to write generated file:', e)
+          }
+        }
+        const fileName = resolvedPath.split(/[\\/]/).pop() || resolvedPath
+        const newFile: EditorFile = {
+          path: resolvedPath,
+          name: fileName,
+          content: agentResponse.content.code,
+          isModified: !activeApp,
+        }
+        const existing = openFilesRef.current.find((f) => f.path === resolvedPath)
+        if (existing) {
+          const updatedFile: EditorFile = {
+            ...existing,
+            content: agentResponse.content.code,
+            isModified: !activeApp,
+          }
+          setOpenFiles((prev) =>
+            prev.map((f) => (f.path === resolvedPath ? updatedFile : f))
           )
-        )
-        setActiveFile(existing)
-      } else {
-        // Add new file
-        setOpenFiles((prev) => [...prev, newFile])
-        setActiveFile(newFile)
+          setActiveFile(updatedFile)
+        } else {
+          setOpenFiles((prev) => [...prev, newFile])
+          setActiveFile(newFile)
+        }
+        onAgentResponseProcessed?.()
+      }
+      writeAndOpen()
+    }
+  }, [agentResponse, activeApp, onAppFilesChanged, onAgentResponseProcessed])
+
+  // Reset preview when switching to a non-JSON file
+  useEffect(() => {
+    const isJson = activeFile?.path?.toLowerCase().endsWith('.json')
+    if (!isJson) setShowPreview(false)
+  }, [activeFile?.path])
+
+  const isJsonFile = activeFile?.path?.toLowerCase().endsWith('.json')
+  const layoutNode = activeFile && isJsonFile ? parseLayoutJson(activeFile.content) : null
+  const showLayoutPreview = showPreview && isJsonFile && layoutNode
+
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
+  const configShortcut = isMac ? '⌘1' : 'Ctrl+1'
+  const previewShortcut = isMac ? '⌘2' : 'Ctrl+2'
+
+  // Cmd+1 / Ctrl+1 → Configuration, Cmd+2 / Ctrl+2 → Preview (when JSON file is active)
+  useEffect(() => {
+    if (!activeFile || !isJsonFile) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod || e.altKey || e.shiftKey) return
+      if (e.key === '1') {
+        e.preventDefault()
+        setShowPreview(false)
+      } else if (e.key === '2') {
+        e.preventDefault()
+        setShowPreview(true)
       }
     }
-  }, [agentResponse])
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [activeFile, isJsonFile])
 
   return (
     <div className="flex-1 bg-[#1e1e1e] flex flex-col overflow-hidden">
@@ -308,6 +633,34 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
         />
       )}
 
+      {/* Code / Preview toolbar for JSON layout files */}
+      {activeFile && isJsonFile && (
+        <div className="h-9 bg-[#252526] border-b border-[#3e3e3e] flex items-center gap-1 px-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`text-sm ${!showPreview ? 'bg-[#3e3e3e] text-white' : 'text-gray-400 hover:text-gray-200'}`}
+            onClick={() => setShowPreview(false)}
+            title={`Configuration (${configShortcut})`}
+          >
+            <Code className="w-4 h-4 mr-1" />
+            Configuration
+            <span className="ml-1.5 opacity-60 text-xs font-normal">{configShortcut}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`text-sm ${showPreview ? 'bg-[#3e3e3e] text-white' : 'text-gray-400 hover:text-gray-200'}`}
+            onClick={() => setShowPreview(true)}
+            title={`Preview (${previewShortcut})`}
+          >
+            <Layout className="w-4 h-4 mr-1" />
+            Preview
+            <span className="ml-1.5 opacity-60 text-xs font-normal">{previewShortcut}</span>
+          </Button>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden">
         {agentResponse && agentResponse.type !== 'code' ? (
@@ -316,11 +669,31 @@ export function BuilderDashboard({ user, activeProject, agentResponse }: Builder
             Agent Response Viewer (to be implemented)
           </div>
         ) : activeFile ? (
-          <EditorView
-            file={activeFile}
-            onChange={handleFileChange}
-            onSave={handleSave}
-          />
+          showLayoutPreview ? (
+            <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e]">
+              <div className="min-h-full rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
+                <LayoutRenderer node={layoutNode!} registry={defaultLayoutRegistry} />
+              </div>
+            </div>
+          ) : layoutNode === null && showPreview && isJsonFile ? (
+            <div className="flex-1 flex items-center justify-center p-8 text-gray-400">
+              Invalid layout JSON. Ensure the file has a root object with a <code className="bg-[#3e3e3e] px-1 rounded">type</code> field.
+            </div>
+          ) : isJsonFile ? (
+            <JsonSplitView
+              file={activeFile}
+              onChange={handleFileChange}
+              onSave={handleSave}
+              onRegisterGetSelection={(getter) => { getEditorSelectionRef.current = getter }}
+            />
+          ) : (
+            <EditorView
+              file={activeFile}
+              onChange={handleFileChange}
+              onSave={handleSave}
+              onRegisterGetSelection={(getter) => { getEditorSelectionRef.current = getter }}
+            />
+          )
         ) : activeProject ? (
           <div className="flex-1 flex items-center justify-center p-8 text-gray-300">
             Project loaded. Open a file from the sidebar or File menu.

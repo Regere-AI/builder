@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { LeftSidebar } from './LeftSidebar'
 import { BuilderDashboard } from './BuilderDashboard'
-import { ChatPanel } from './ChatPanel'
+import { ChatPanel, type AgentResponsePayload } from './ChatPanel'
+import type { EditorSelectionPayload } from './EditorView'
 import { StatusBar } from './StatusBar'
 import type { LaunchpadConfig } from '@/services/api'
 
@@ -11,19 +12,42 @@ interface User {
   email: string
 }
 
+export interface ActiveApp {
+  rootPath: string
+  name: string
+}
+
 interface IDELayoutProps {
   user: User
-  agentResponse?: any
-  activeProject?: any
+  activeProject?: unknown
+  activeApp: ActiveApp | null
+  onOpenApp: (app: ActiveApp | null) => void
+  onCloseApp: () => void
   selectedLaunchpad?: LaunchpadConfig | null
   onLogout: () => void
   onSwitchLaunchpad: () => void
 }
 
-export function IDELayout({ user, onLogout, agentResponse, activeProject, selectedLaunchpad, onSwitchLaunchpad }: IDELayoutProps) {
+export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp, onCloseApp, selectedLaunchpad, onSwitchLaunchpad }: IDELayoutProps) {
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
   const [chatPanelWidth, setChatPanelWidth] = useState(320)
+  const [pendingChatContext, setPendingChatContext] = useState<EditorSelectionPayload | null>(null)
+  const [agentResponse, setAgentResponse] = useState<AgentResponsePayload | undefined>(undefined)
+  const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0)
+  const openFileFromSidebarHandlerRef = useRef<((path: string, content: string) => void) | null>(null)
+  const filesDeletedFromSidebarHandlerRef = useRef<((paths: string[]) => void) | null>(null)
+  const handleOpenFileFromSidebar = useCallback((path: string, content: string) => {
+    openFileFromSidebarHandlerRef.current?.(path, content)
+  }, [])
+  const handleFilesDeletedFromSidebar = useCallback((paths: string[]) => {
+    filesDeletedFromSidebarHandlerRef.current?.(paths)
+  }, [])
+  const handleAddSelectionToChat = useCallback((payload: EditorSelectionPayload) => {
+    setChatPanelOpen(true)
+    setPendingChatContext(payload)
+  }, [])
+  const handleConsumePendingContext = useCallback(() => setPendingChatContext(null), [])
 
   // Keyboard shortcut handler for chat panel (Ctrl+L / Cmd+L)
   useEffect(() => {
@@ -54,13 +78,29 @@ export function IDELayout({ user, onLogout, agentResponse, activeProject, select
       {/* Main Layout */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Sidebar */}
-        <LeftSidebar 
+        <LeftSidebar
           expanded={sidebarExpanded}
           onToggle={() => setSidebarExpanded(!sidebarExpanded)}
+          activeApp={activeApp}
+          onOpenApp={onOpenApp}
+          onCloseApp={onCloseApp}
+          onOpenFile={handleOpenFileFromSidebar}
+          onDeletePaths={handleFilesDeletedFromSidebar}
+          refreshTrigger={sidebarRefreshTrigger}
         />
 
         {/* Center Content - BuilderDashboard */}
-        <BuilderDashboard user={user} agentResponse={agentResponse} activeProject={activeProject} />
+        <BuilderDashboard
+          user={user}
+          agentResponse={agentResponse}
+          activeProject={activeProject}
+          activeApp={activeApp}
+          registerOpenFileFromSidebar={(handler) => { openFileFromSidebarHandlerRef.current = handler }}
+          registerFilesDeletedFromSidebar={(handler) => { filesDeletedFromSidebarHandlerRef.current = handler }}
+          onAppFilesChanged={() => setSidebarRefreshTrigger((n) => n + 1)}
+          onAgentResponseProcessed={() => setAgentResponse(undefined)}
+          onAddSelectionToChat={handleAddSelectionToChat}
+        />
 
         {/* Right Chat Panel */}
         <ChatPanel 
@@ -68,6 +108,9 @@ export function IDELayout({ user, onLogout, agentResponse, activeProject, select
           onClose={() => setChatPanelOpen(false)}
           width={chatPanelWidth}
           onWidthChange={setChatPanelWidth}
+          onAgentResponse={setAgentResponse}
+          pendingContext={pendingChatContext}
+          onConsumePendingContext={handleConsumePendingContext}
         />
       </div>
 

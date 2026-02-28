@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, MessageSquare, Send, GripVertical } from 'lucide-react'
+import { X, MessageSquare, Send, GripVertical, FileCode } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Select } from '../ui/select'
 import { cn } from '@/lib/utils'
+import { generate, getGenerateResponseText, isTauri } from '@/desktop'
+import type { EditorSelectionPayload } from './EditorView'
 
 interface Message {
   id: string
@@ -11,23 +13,36 @@ interface Message {
   timestamp: Date
 }
 
+export interface AgentResponsePayload {
+  type: 'code'
+  content: { code: string; filePath?: string }
+}
+
 interface ChatPanelProps {
   isOpen: boolean
   onClose: () => void
   width?: number
   onWidthChange?: (width: number) => void
+  onAgentResponse?: (data: AgentResponsePayload) => void
+  /** When set, add this selection to attached contexts (e.g. from Ctrl+L); shown as a chip with remove button. */
+  pendingContext?: EditorSelectionPayload | null
+  /** Called after pendingContext has been added to attached list. */
+  onConsumePendingContext?: () => void
 }
 
 const MIN_WIDTH = 300
 const MAX_WIDTH = 800
 const DEFAULT_WIDTH = 320
 
-export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelProps) {
+export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentResponse, pendingContext, onConsumePendingContext }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [agentMode, setAgentMode] = useState<'Agent' | 'Plan'>('Agent')
   const [panelWidth, setPanelWidth] = useState(width || DEFAULT_WIDTH)
   const [isResizing, setIsResizing] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [attachedContexts, setAttachedContexts] = useState<EditorSelectionPayload[]>([])
+  const lastAddedContextKeyRef = useRef<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const resizeRef = useRef<HTMLDivElement>(null)
@@ -38,6 +53,46 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelPr
       setPanelWidth(width)
     }
   }, [width])
+
+  const contextKey = useCallback((p: EditorSelectionPayload) =>
+    `${p.filePath}:${p.startLine}:${p.endLine}:${p.text}`, [])
+
+  // Format selection for prompt: file path, line range, and code with line numbers
+  const formatSelectionCard = useCallback((payload: EditorSelectionPayload): string => {
+    const { filePath, startLine, endLine, text } = payload
+    const lines = text.split('\n')
+    const withLineNumbers = lines
+      .map((line, i) => `${startLine + i} | ${line}`)
+      .join('\n')
+    const fileLabel = filePath ? filePath.replace(/^.*[/\\]/, '') : 'selection'
+    const lineRange = startLine > 0 && endLine >= startLine
+      ? ` (lines ${startLine}-${endLine})`
+      : ''
+    return `\`${fileLabel}\`${lineRange}\n\n\`\`\`\n${withLineNumbers}\n\`\`\``
+  }, [])
+
+  // Add pending context to attached list (dedupe by key), then consume. Ref prevents duplicate when effect or event fires twice before state flushes.
+  useEffect(() => {
+    if (!pendingContext?.text?.trim()) {
+      lastAddedContextKeyRef.current = null
+      return
+    }
+    const key = contextKey(pendingContext)
+    if (lastAddedContextKeyRef.current === key) {
+      onConsumePendingContext?.()
+      return
+    }
+    lastAddedContextKeyRef.current = key
+    setAttachedContexts((prev) => {
+      if (prev.some((p) => contextKey(p) === key)) return prev
+      return [...prev, pendingContext]
+    })
+    onConsumePendingContext?.()
+  }, [pendingContext, onConsumePendingContext, contextKey])
+
+  const removeAttachedContext = useCallback((index: number) => {
+    setAttachedContexts((prev) => prev.filter((_, i) => i !== index))
+  }, [])
 
   // Auto-scroll to bottom when new messages are added
   useEffect(() => {
@@ -110,30 +165,75 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelPr
     }
   }, [isResizing, onWidthChange])
 
-  const handleSend = () => {
-    if (!inputValue.trim()) return
+  const handleSend = async () => {
+    const hasInput = inputValue.trim().length > 0
+    const hasContext = attachedContexts.length > 0
+    if (!hasInput && !hasContext) return
+
+    const contextBlocks = attachedContexts.map(formatSelectionCard)
+    const prompt = contextBlocks.length > 0
+      ? contextBlocks.join('\n\n') + (hasInput ? '\n\n' + inputValue.trim() : '')
+      : inputValue.trim()
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: inputValue.trim(),
+      content: prompt,
       role: 'user',
       timestamp: new Date(),
     }
 
     setMessages((prev) => [...prev, userMessage])
     setInputValue('')
+    setAttachedContexts([])
 
-    // TODO: Add actual chat functionality here
-    // For now, just echo back a placeholder response
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: 'This is a placeholder response. Chat functionality will be implemented later.',
-        role: 'assistant',
-        timestamp: new Date(),
+    const assistantId = (Date.now() + 1).toString()
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, content: '', role: 'assistant', timestamp: new Date() },
+    ])
+    setIsLoading(true)
+
+    if (isTauri()) {
+      try {
+        const response = await generate(prompt, {
+          stream: false,
+          mode: 'generator',
+          includeSteps: false,
+        })
+        const text = getGenerateResponseText(response)
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: text || '(No content)' } : m
+          )
+        )
+        if (text) {
+          const trimmed = text.trim()
+          const isJson = trimmed.startsWith('{') || trimmed.startsWith('[')
+          onAgentResponse?.({
+            type: 'code',
+            content: { code: text, filePath: isJson ? 'uiConfigs/generated.json' : 'uiConfigs/generated.tsx' },
+          })
+        }
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err)
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: `Error: ${errorMessage}` } : m
+          )
+        )
+      } finally {
+        setIsLoading(false)
       }
-      setMessages((prev) => [...prev, assistantMessage])
-    }, 500)
+    } else {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? { ...m, content: 'Chat requires the desktop app (Tauri). Run: npm run tauri dev' }
+            : m
+        )
+      )
+      setIsLoading(false)
+    }
   }
 
 
@@ -168,7 +268,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelPr
         <button
           onClick={onClose}
           className="p-1 hover:bg-[#3e3e3e] rounded transition-colors"
-          title="Close chat (Ctrl+L)"
+          title="Close chat (Ctrl+K)"
         >
           <X className="w-4 h-4 text-gray-400 hover:text-gray-200" />
         </button>
@@ -183,7 +283,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelPr
               Start a conversation by typing a message below.
             </p>
             <p className="text-xs text-gray-600 mt-2">
-              Press Ctrl+L to toggle this panel
+              Select code and press Ctrl+L to add it to the chat
             </p>
           </div>
         ) : (
@@ -203,7 +303,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelPr
                     : 'bg-[#2d2d2d] text-gray-300 border border-[#3e3e3e]'
                 )}
               >
-                {message.content}
+                {message.content || (message.role === 'assistant' && isLoading ? '…' : '')}
               </div>
               <span className="text-xs text-gray-600">
                 {message.timestamp.toLocaleTimeString([], {
@@ -222,6 +322,37 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelPr
         <div className="flex flex-col gap-2">
           {/* Input Field Container */}
           <div className="bg-[#1e1e1e] border border-[#3e3e3e] rounded-md focus-within:ring-2 focus-within:ring-[#007acc] focus-within:ring-offset-2 focus-within:ring-offset-[#2d2d2d] focus-within:border-[#007acc]">
+            {/* Context chips (Cursor-style): file + line range + remove */}
+            {attachedContexts.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-3 pt-3">
+                {attachedContexts.map((payload, index) => {
+                  const fileLabel = payload.filePath ? payload.filePath.replace(/^.*[/\\]/, '') : 'selection'
+                  const lineLabel = payload.startLine > 0 && payload.endLine >= payload.startLine
+                    ? `(${payload.startLine}-${payload.endLine})`
+                    : ''
+                  return (
+                    <div
+                      key={contextKey(payload)}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-[#2d2d2d] border border-[#3e3e3e] px-2.5 py-1.5 text-sm text-gray-300"
+                    >
+                      <FileCode className="w-3.5 h-3.5 text-[#7eb8da] shrink-0" />
+                      <span className="truncate max-w-[180px]">
+                        {fileLabel} {lineLabel}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeAttachedContext(index)}
+                        className="p-0.5 rounded hover:bg-[#3e3e3e] text-gray-400 hover:text-gray-200 shrink-0"
+                        title="Remove context"
+                        aria-label="Remove context"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
             <textarea
               ref={inputRef}
               value={inputValue}
@@ -256,7 +387,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange }: ChatPanelPr
             {/* Send Button */}
             <Button
               onClick={handleSend}
-              disabled={!inputValue.trim()}
+              disabled={(!inputValue.trim() && attachedContexts.length === 0) || isLoading}
               className="text-white px-4 bg-[#2d2d2d]"
               size="default"
             >

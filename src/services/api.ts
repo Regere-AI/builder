@@ -187,21 +187,27 @@ export interface LaunchpadConfig {
   color?: string
   environment?: LaunchpadEnvironment
   customerName?: string
+  tenant?: string
+  configFolderPath?: string
 }
 
 export interface LaunchpadAddInput {
   url: string
   email: string
   password: string
+  tenant: string
+  customerName: string
+  configFolderPath: string
   color?: string
   environment?: LaunchpadEnvironment
-  customerName?: string
 }
 
 export interface LaunchpadUpdateInput {
   url?: string
   email?: string
   password?: string
+  tenant?: string
+  configFolderPath?: string
   color?: string
   environment?: LaunchpadEnvironment
   customerName?: string
@@ -227,13 +233,15 @@ function setStored(configs: StoredLaunchpadConfig[]) {
 }
 
 export function launchpadList(): Promise<LaunchpadConfig[]> {
-  const list = getStored().map(({ id, url, email, color, environment, customerName }) => ({
+  const list = getStored().map(({ id, url, email, color, environment, customerName, tenant, configFolderPath }) => ({
     id,
     url,
     email,
     color: color ?? DEFAULT_LAUNCHPAD_COLOR,
     environment: environment ?? DEFAULT_LAUNCHPAD_ENVIRONMENT,
     customerName: customerName?.trim() || undefined,
+    tenant: tenant?.trim() || undefined,
+    configFolderPath: configFolderPath?.trim() || undefined,
   }))
   return Promise.resolve(list)
 }
@@ -241,20 +249,31 @@ export function launchpadList(): Promise<LaunchpadConfig[]> {
 export function launchpadAdd(input: LaunchpadAddInput): Promise<LaunchpadConfig> {
   const url = input.url.trim()
   const email = input.email.trim()
+  const tenant = input.tenant.trim()
   if (!url || !email) {
     return Promise.reject(new Error('URL and email are required'))
+  }
+  if (!tenant) {
+    return Promise.reject(new Error('Tenant is required'))
+  }
+  const customerName = input.customerName?.trim()
+  if (!customerName) {
+    return Promise.reject(new Error('Customer name is required'))
+  }
+  const configFolderPath = input.configFolderPath?.trim()
+  if (!configFolderPath) {
+    return Promise.reject(new Error('Config folder path is required'))
   }
   const id = typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
     : `lp-${Date.now()}-${Math.random().toString(36).slice(2)}`
   const color = input.color?.trim() || DEFAULT_LAUNCHPAD_COLOR
   const environment = input.environment ?? DEFAULT_LAUNCHPAD_ENVIRONMENT
-  const customerName = input.customerName?.trim() || undefined
-  const stored: StoredLaunchpadConfig = { id, url, email, password: input.password, color, environment, customerName }
+  const stored: StoredLaunchpadConfig = { id, url, email, password: input.password, tenant, configFolderPath, color, environment, customerName }
   const list = getStored()
   list.push(stored)
   setStored(list)
-  return Promise.resolve({ id, url, email, color, environment, customerName })
+  return Promise.resolve({ id, url, email, color, environment, customerName, tenant, configFolderPath })
 }
 
 export function launchpadUpdate(id: string, input: LaunchpadUpdateInput): Promise<LaunchpadConfig> {
@@ -265,13 +284,18 @@ export function launchpadUpdate(id: string, input: LaunchpadUpdateInput): Promis
   const url = input.url !== undefined ? input.url.trim() : current.url
   const email = input.email !== undefined ? input.email.trim() : current.email
   const password = input.password !== undefined ? input.password : current.password
+  const tenantValue = input.tenant !== undefined ? (input.tenant?.trim() || undefined) : (current as StoredLaunchpadConfig).tenant
+  if (!tenantValue) return Promise.reject(new Error('Tenant is required'))
   const color = input.color?.trim() || current.color || DEFAULT_LAUNCHPAD_COLOR
   const environment = input.environment ?? current.environment ?? DEFAULT_LAUNCHPAD_ENVIRONMENT
   const customerName = input.customerName !== undefined ? (input.customerName?.trim() || undefined) : current.customerName
+  if (!customerName) return Promise.reject(new Error('Customer name is required'))
+  const configFolderPath = input.configFolderPath !== undefined ? (input.configFolderPath?.trim() || undefined) : (current as StoredLaunchpadConfig).configFolderPath
+  if (!configFolderPath) return Promise.reject(new Error('Config folder path is required'))
   if (!url || !email) return Promise.reject(new Error('URL and email are required'))
-  list[idx] = { ...current, id, url, email, password, color, environment, customerName }
+  list[idx] = { ...current, id, url, email, password, tenant: tenantValue, configFolderPath, color, environment, customerName }
   setStored(list)
-  return Promise.resolve({ id, url, email, color, environment, customerName })
+  return Promise.resolve({ id, url, email, color, environment, customerName, tenant: tenantValue, configFolderPath })
 }
 
 export function launchpadDelete(id: string): Promise<void> {
@@ -292,6 +316,8 @@ export function launchpadGet(id: string): (LaunchpadConfig & { password: string 
         color: c.color ?? DEFAULT_LAUNCHPAD_COLOR,
         environment: c.environment ?? DEFAULT_LAUNCHPAD_ENVIRONMENT,
         customerName: c.customerName?.trim() || undefined,
+        tenant: c.tenant?.trim() || undefined,
+        configFolderPath: c.configFolderPath?.trim() || undefined,
       }
     : null
 }

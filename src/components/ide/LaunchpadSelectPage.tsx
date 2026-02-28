@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Rocket, Plus, X, Mail, Check, Globe, Pencil, Trash2, Search } from 'lucide-react'
+import { Rocket, Plus, X, Mail, Check, Globe, Pencil, Trash2, Search, FolderOpen } from 'lucide-react'
 import { Button } from '../ui/button'
 import {
   launchpadList,
@@ -10,6 +10,7 @@ import {
   type LaunchpadConfig,
   type LaunchpadEnvironment,
 } from '@/services/api'
+import { openAppFolder, isTauri } from '@/desktop'
 import { cn } from '@/lib/utils'
 
 const DEFAULT_COLOR = '#007acc'
@@ -33,7 +34,7 @@ interface LaunchpadSelectPageProps {
   onGetIn: (selectedLaunchpad: LaunchpadConfig | null) => void
 }
 
-const initialForm = { url: '', email: '', password: '', color: DEFAULT_COLOR, environment: 'dev' as LaunchpadEnvironment, customerName: '' }
+const initialForm = { url: '', email: '', password: '', color: DEFAULT_COLOR, environment: 'dev' as LaunchpadEnvironment, customerName: '', tenant: '', configFolderPath: '' }
 
 export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps) {
   const [launchpads, setLaunchpads] = useState<LaunchpadConfig[]>([])
@@ -54,8 +55,10 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
       const url = (c.url ?? '').toLowerCase()
       const email = (c.email ?? '').toLowerCase()
       const customerName = (c.customerName ?? '').toLowerCase()
+      const tenant = (c.tenant ?? '').toLowerCase()
+      const configFolderPath = (c.configFolderPath ?? '').toLowerCase()
       const env = (c.environment ?? 'dev').toLowerCase()
-      return url.includes(q) || email.includes(q) || customerName.includes(q) || env.includes(q)
+      return url.includes(q) || email.includes(q) || customerName.includes(q) || tenant.includes(q) || configFolderPath.includes(q) || env.includes(q)
     })
   }, [launchpads, searchQuery])
 
@@ -96,6 +99,8 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
       color: config.color ?? DEFAULT_COLOR,
       environment: config.environment ?? 'dev',
       customerName: config.customerName ?? '',
+      tenant: config.tenant ?? '',
+      configFolderPath: config.configFolderPath ?? '',
     })
     setFormError(null)
     setDialogOpen(true)
@@ -119,6 +124,21 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
       setFormError('Email is required')
       return
     }
+    const tenant = form.tenant.trim()
+    if (!tenant) {
+      setFormError('Tenant is required')
+      return
+    }
+    const customerName = form.customerName.trim()
+    if (!customerName) {
+      setFormError('Customer name is required')
+      return
+    }
+    const configFolderPath = form.configFolderPath.trim()
+    if (!configFolderPath) {
+      setFormError('Config folder path is required')
+      return
+    }
     if (!editId && !form.password) {
       setFormError('Password is required')
       return
@@ -131,12 +151,14 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
           url,
           email,
           ...(form.password ? { password: form.password } : {}),
+          tenant,
+          configFolderPath,
           color: form.color || DEFAULT_COLOR,
           environment: form.environment,
-          customerName: form.customerName.trim() || undefined,
+          customerName,
         })
       } else {
-        await launchpadAdd({ url, email, password: form.password, color: form.color || DEFAULT_COLOR, environment: form.environment, customerName: form.customerName.trim() || undefined })
+        await launchpadAdd({ url, email, password: form.password, tenant, customerName, configFolderPath, color: form.color || DEFAULT_COLOR, environment: form.environment })
       }
       loadLaunchpads()
       closeDialog()
@@ -349,10 +371,10 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
           onClick={(e) => e.target === e.currentTarget && closeDialog()}
         >
           <div
-            className="w-full max-w-md rounded-xl border border-[#3e3e3e] bg-[#2d2d2d] shadow-xl"
+            className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl border border-[#3e3e3e] bg-[#2d2d2d] shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between p-4 border-b border-[#3e3e3e]">
+            <div className="flex items-center justify-between shrink-0 p-4 border-b border-[#3e3e3e]">
               <h2 className="text-lg font-semibold text-gray-200">
                 {editId ? 'Edit launchpad' : 'Add launchpad'}
               </h2>
@@ -365,99 +387,156 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
               </button>
             </div>
             <form
-              className="p-4 space-y-4"
+              className="flex flex-col min-h-0 p-4 overflow-y-auto"
               onSubmit={(e) => {
                 e.preventDefault()
                 handleSaveLaunchpad()
               }}
             >
               {formError && (
-                <p className="text-sm text-red-400">{formError}</p>
+                <p className="text-sm text-red-400 mb-4">{formError}</p>
               )}
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1.5">Customer name (optional)</label>
-                <input
-                  type="text"
-                  value={form.customerName}
-                  onChange={(e) => setForm((f) => ({ ...f, customerName: e.target.value }))}
-                  placeholder="e.g. Acme Corp"
-                  className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1.5">URL</label>
-                <input
-                  type="url"
-                  value={form.url}
-                  onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-                  placeholder="https://..."
-                  className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1.5">Email</label>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                  placeholder="you@example.com"
-                  className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1.5">Password</label>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  placeholder={editId ? 'Leave blank to keep current' : '••••••••'}
-                  className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1.5">Environment</label>
-                <div className="flex gap-2">
-                  {ENVIRONMENTS.map((env) => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Customer: two columns */}
+                <div className="space-y-3 rounded-lg border border-[#3e3e3e] bg-[#1e1e1e]/50 p-3 sm:col-span-2">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-1.5">Customer name (required)</label>
+                      <input
+                        type="text"
+                        value={form.customerName}
+                        onChange={(e) => setForm((f) => ({ ...f, customerName: e.target.value }))}
+                        placeholder="e.g. Acme Corp"
+                        className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-1.5">Tenant (required)</label>
+                      <input
+                        type="text"
+                        value={form.tenant}
+                        onChange={(e) => setForm((f) => ({ ...f, tenant: e.target.value }))}
+                        placeholder="e.g. acme-prod"
+                        className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                      />
+                    </div>
+                  </div>
+                </div>
+                {/* Config folder: full width */}
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-gray-400 mb-1.5">Config folder path (required)</label>
+                  <p className="text-xs text-gray-500 mb-1.5">All configurations created will be stored in this folder.</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={form.configFolderPath}
+                      onChange={(e) => setForm((f) => ({ ...f, configFolderPath: e.target.value }))}
+                      placeholder="/path/to/config/folder"
+                      className="flex-1 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                    />
                     <button
-                      key={env.value}
                       type="button"
-                      onClick={() => setForm((f) => ({ ...f, environment: env.value }))}
-                      className={cn(
-                        'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
-                        form.environment === env.value
-                          ? 'border-[#007acc] bg-[#007acc]/20 text-[#007acc]'
-                          : 'border-[#3e3e3e] bg-[#1e1e1e] text-gray-400 hover:border-[#5e5e5e] hover:text-gray-300'
-                      )}
+                      onClick={async () => {
+                        if (!isTauri()) {
+                          setFormError('Choose folder is only available in the desktop app.')
+                          return
+                        }
+                        try {
+                          const result = await openAppFolder()
+                          if (!result.canceled && result.path) {
+                            setForm((f) => ({ ...f, configFolderPath: result.path ?? '' }))
+                            setFormError(null)
+                          }
+                        } catch (e) {
+                          setFormError(e instanceof Error ? e.message : 'Failed to open folder picker')
+                        }
+                      }}
+                      className="shrink-0 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] p-2 text-gray-400 hover:text-gray-200 hover:bg-[#3e3e3e] focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                      title="Choose folder"
                     >
-                      {env.label}
+                      <FolderOpen className="w-5 h-5" />
                     </button>
-                  ))}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-400 mb-1.5">Color</label>
-                <div className="flex items-center gap-3">
+                {/* URL | Email */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1.5">URL</label>
                   <input
-                    type="color"
-                    value={form.color}
-                    onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
-                    className="h-10 w-14 cursor-pointer rounded border border-[#3e3e3e] bg-[#1e1e1e] p-0.5"
-                  />
-                  <input
-                    type="text"
-                    value={form.color}
-                    onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
-                    placeholder="#007acc"
-                    className="flex-1 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc] font-mono text-sm"
+                    type="url"
+                    value={form.url}
+                    onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+                    placeholder="https://..."
+                    className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1.5">Email</label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                    placeholder="you@example.com"
+                    className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                  />
+                </div>
+                {/* Password: full width on small screens, else one column */}
+                <div className="sm:col-span-2">
+                  <label className="block text-sm font-medium text-gray-400 mb-1.5">Password</label>
+                  <input
+                    type="password"
+                    value={form.password}
+                    onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                    placeholder={editId ? 'Leave blank to keep current' : '••••••••'}
+                    className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                  />
+                </div>
+                {/* Environment | Color */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1.5">Environment</label>
+                  <div className="flex gap-2">
+                    {ENVIRONMENTS.map((env) => (
+                      <button
+                        key={env.value}
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, environment: env.value }))}
+                        className={cn(
+                          'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
+                          form.environment === env.value
+                            ? 'border-[#007acc] bg-[#007acc]/20 text-[#007acc]'
+                            : 'border-[#3e3e3e] bg-[#1e1e1e] text-gray-400 hover:border-[#5e5e5e] hover:text-gray-300'
+                        )}
+                      >
+                        {env.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1.5">Color</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={form.color}
+                      onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                      className="h-10 w-14 cursor-pointer rounded border border-[#3e3e3e] bg-[#1e1e1e] p-0.5 shrink-0"
+                    />
+                    <input
+                      type="text"
+                      value={form.color}
+                      onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+                      placeholder="#007acc"
+                      className="flex-1 min-w-0 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc] font-mono text-sm"
+                    />
+                  </div>
+                </div>
               </div>
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2 pt-4 mt-2 shrink-0 border-t border-[#3e3e3e]">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={closeDialog}
-                  className="flex-1 border-[#3e3e3e] text-gray-300 hover:bg-[#3e3e3e]"
+                  className="flex-1 border-gray-500 bg-[#3e3e3e]/60 text-gray-100 hover:bg-[#4e4e4e] hover:text-white hover:border-gray-400"
                 >
                   Cancel
                 </Button>
