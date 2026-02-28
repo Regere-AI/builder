@@ -19,7 +19,7 @@ function parseLayoutJson(content: string): LayoutNode | null {
     return null
   }
 }
-import { Menu, Submenu, MenuItem, PredefinedMenuItem } from '@tauri-apps/api/menu'
+import { Menu, Submenu, MenuItem, PredefinedMenuItem, CheckMenuItem } from '@tauri-apps/api/menu'
 import { listen } from '@tauri-apps/api/event'
 import { exit } from '@tauri-apps/plugin-process'
 
@@ -51,11 +51,21 @@ export function BuilderDashboard({
   agentResponse,
   onAddSelectionToChat,
 }: BuilderDashboardProps) {
+  const AUTO_SAVE_KEY = 'builder-auto-save'
   const [openFiles, setOpenFiles] = useState<EditorFile[]>([])
   const [activeFile, setActiveFile] = useState<EditorFile | null>(null)
   const [showPreview, setShowPreview] = useState(false)
+  const [autoSave, setAutoSave] = useState(() => {
+    try {
+      return localStorage.getItem(AUTO_SAVE_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
   const openFilesRef = useRef<EditorFile[]>([])
   openFilesRef.current = openFiles
+  const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingAutoSaveRef = useRef<{ path: string; content: string } | null>(null)
   const getEditorSelectionRef = useRef<GetEditorSelection>(() => null)
   const onAddSelectionToChatRef = useRef(onAddSelectionToChat)
   onAddSelectionToChatRef.current = onAddSelectionToChat
@@ -77,6 +87,13 @@ export function BuilderDashboard({
     registerOpenFileFromSidebar(handler)
     return () => registerOpenFileFromSidebar(() => {})
   }, [registerOpenFileFromSidebar])
+
+  // Clear auto-save timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current)
+    }
+  }, [])
 
   // Close tabs when files/folders are deleted from the sidebar
   useEffect(() => {
@@ -199,6 +216,31 @@ export function BuilderDashboard({
     setActiveFile((prev) =>
       prev ? { ...prev, content: value, isModified: true } : null
     )
+
+    // Auto-save: debounced write to disk when enabled (only for files with a real path)
+    if (autoSave && isTauri() && (activeFile.path.includes('/') || activeFile.path.includes('\\'))) {
+      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current)
+      pendingAutoSaveRef.current = { path: activeFile.path, content: value }
+      autoSaveTimeoutRef.current = setTimeout(async () => {
+        const pending = pendingAutoSaveRef.current
+        autoSaveTimeoutRef.current = null
+        pendingAutoSaveRef.current = null
+        if (!pending) return
+        try {
+          await appWriteTextFile(pending.path, pending.content)
+          setOpenFiles((prev) =>
+            prev.map((f) =>
+              f.path === pending.path ? { ...f, isModified: false } : f
+            )
+          )
+          setActiveFile((prev) =>
+            prev?.path === pending.path ? { ...prev, isModified: false } : prev
+          )
+        } catch (e) {
+          console.error('Auto-save failed:', e)
+        }
+      }, 800)
+    }
   }
 
   const handleSave = async () => {
@@ -323,6 +365,22 @@ export function BuilderDashboard({
         action: () => runOnce('save-as', () => handlersRef.current.handleSaveAs()),
       })
       const separator = await PredefinedMenuItem.new({ item: 'Separator' })
+      const autoSaveItem = await CheckMenuItem.new({
+        id: 'auto-save',
+        text: 'Auto Save',
+        checked: autoSave,
+        action: () => {
+          setAutoSave((prev) => {
+            const next = !prev
+            try {
+              localStorage.setItem(AUTO_SAVE_KEY, next ? 'true' : 'false')
+            } catch {
+              // ignore
+            }
+            return next
+          })
+        },
+      })
       const quitItem = await MenuItem.new({
         id: 'quit',
         text: isMac ? 'Quit' : 'Exit',
@@ -332,7 +390,7 @@ export function BuilderDashboard({
 
       const fileSubmenu = await Submenu.new({
         text: 'File',
-        items: [newItem, openItem, separator, saveItem, saveAsItem, separator, quitItem],
+        items: [newItem, openItem, separator, saveItem, saveAsItem, separator, autoSaveItem, separator, quitItem],
       })
 
       const undoItem = await PredefinedMenuItem.new({ item: 'Undo' })
@@ -479,7 +537,7 @@ export function BuilderDashboard({
     return () => {
       mounted = false
     }
-  }, [])
+  }, [autoSave])
 
   // Handle agent responses - open files from agent (write to uiConfigs when activeApp is set)
   useEffect(() => {
@@ -563,7 +621,7 @@ export function BuilderDashboard({
             onClick={() => setShowPreview(false)}
           >
             <Code className="w-4 h-4 mr-1" />
-            Code
+            Configuration
           </Button>
           <Button
             variant="ghost"
