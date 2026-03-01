@@ -3,7 +3,7 @@ import { X, MessageSquare, Send, GripVertical, FileCode } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Select } from '../ui/select'
 import { cn } from '@/lib/utils'
-import { generate, getGenerateResponseText, isTauri } from '@/desktop'
+import { chat, getAgentResponseText, isTauri, isEmptyLayoutResponse } from '@/desktop'
 import type { EditorSelectionPayload } from './EditorView'
 
 interface Message {
@@ -195,23 +195,36 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
 
     if (isTauri()) {
       try {
-        const response = await generate(prompt, {
-          stream: false,
-          mode: 'generator',
-          includeSteps: false,
+        const isPlanMode = agentMode === 'Plan'
+        const response = await chat({
+          messages: [{ role: 'user', parts: [{ type: 'text', text: prompt }] }],
+          agentMode: !isPlanMode,
+          planOnly: isPlanMode,
+          currentUI: null,
         })
-        const text = getGenerateResponseText(response)
+        const text = getAgentResponseText(response)
+        const emptyLayout = isEmptyLayoutResponse(response)
+        const statusHint = emptyLayout
+          ? '\n\n— Empty layout returned. Ensure OPENAI_API_KEY is set in the project .env and the backend is running. Try rephrasing your request.'
+          : ''
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId ? { ...m, content: text || '(No content)' } : m
+            m.id === assistantId
+              ? { ...m, content: (text || 'UI generated. Check the preview.') + statusHint }
+              : m
           )
         )
-        if (text) {
-          const trimmed = text.trim()
-          const isJson = trimmed.startsWith('{') || trimmed.startsWith('[')
+        // Pass generated UI to preview (from content text or from response.ui)
+        const codeForPreview =
+          text?.trim() ||
+          (response && typeof response === 'object' && (response as Record<string, unknown>).ui != null
+            ? JSON.stringify((response as Record<string, unknown>).ui, null, 2)
+            : '')
+        if (codeForPreview) {
+          const isJson = codeForPreview.trimStart().startsWith('{') || codeForPreview.trimStart().startsWith('[')
           onAgentResponse?.({
             type: 'code',
-            content: { code: text, filePath: isJson ? 'uiConfigs/generated.json' : 'uiConfigs/generated.tsx' },
+            content: { code: codeForPreview, filePath: isJson ? 'uiConfigs/generated.json' : 'uiConfigs/generated.tsx' },
           })
         }
       } catch (err) {

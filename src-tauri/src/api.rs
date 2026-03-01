@@ -171,6 +171,98 @@ fn map_reqwest_error(e: reqwest::Error, _fallback: &str) -> String {
     e.to_string().chars().take(200).collect::<String>()
 }
 
+/// User-friendly error when the agent backend is unreachable (e.g. not running).
+fn map_agent_connection_error(e: reqwest::Error, base_url: &str) -> String {
+    if e.is_connect() || e.is_request() {
+        format!(
+            "Could not connect to the agent backend at {}. Is it running? From the project root run: npm run backend:start (or npm run tauri:dev to start both the app and the backend).",
+            base_url
+        )
+    } else {
+        e.to_string().chars().take(200).collect::<String>()
+    }
+}
+
+/// Read response body as text, then parse as JSON. Empty body => {}. Non-JSON body => { "content": text }.
+async fn decode_json_response(
+    res: reqwest::Response,
+    context: &str,
+) -> Result<serde_json::Value, String> {
+    let text = res.text().await.map_err(|e| {
+        format!("{}: {}", context, map_reqwest_error(e, context))
+    })?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    match serde_json::from_str::<serde_json::Value>(trimmed) {
+        Ok(v) => Ok(v),
+        Err(_) => Ok(serde_json::json!({ "content": text })),
+    }
+}
+
+/// Parse Server-Sent Events (SSE) stream and return final JSON.
+/// Prefers the "data-complete" event's `data`; otherwise assembles from "data-json_delta" chunks.
+fn parse_sse_to_json(text: &str) -> Result<serde_json::Value, String> {
+    let mut complete_data: Option<serde_json::Value> = None;
+    let mut json_chunks = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        let data = match line.strip_prefix("data:") {
+            Some(s) => s.trim(),
+            None => continue,
+        };
+        if data == "[DONE]" || data.is_empty() {
+            continue;
+        }
+        let event: serde_json::Value = serde_json::from_str(data)
+            .map_err(|e| format!("SSE parse error: {}", e))?;
+        let event_type = event.get("type").and_then(|t| t.as_str());
+        match event_type {
+            Some("data-complete") => {
+                if let Some(data) = event.get("data").cloned() {
+                    complete_data = Some(data);
+                }
+            }
+            Some("data-json_delta") => {
+                if let Some(chunk) = event.get("data").and_then(|d| d.get("chunk")).and_then(|c| c.as_str()) {
+                    json_chunks.push_str(chunk);
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some(mut data) = complete_data {
+        if let Some(obj) = data.as_object_mut() {
+            if !obj.contains_key("content") {
+                if let Some(ui) = obj.get("ui") {
+                    if let Ok(s) = serde_json::to_string_pretty(ui) {
+                        obj.insert("content".to_string(), serde_json::Value::String(s));
+                    }
+                }
+            }
+        }
+        return Ok(data);
+    }
+    let assembled = json_chunks.trim();
+    if assembled.is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    let mut value: serde_json::Value =
+        serde_json::from_str(assembled).map_err(|e| format!("Assembled JSON invalid: {}", e))?;
+    // Ensure frontend gets a "content" field (layout JSON) so chat doesn't show "(No content)"
+    let content_str = value.get("content").is_none().then(|| {
+        let copy = value.clone();
+        serde_json::to_string_pretty(&copy).ok()
+    }).and_then(|o| o);
+    if let Some(s) = content_str {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("content".to_string(), serde_json::Value::String(s));
+        }
+    }
+    Ok(value)
+}
+
 /// Extract error message from API error response (error, message, details[].msg, errors[]).
 fn extract_error_message(text: &str, fallback: &str) -> String {
     let v = match serde_json::from_str::<serde_json::Value>(text).ok() {
@@ -432,62 +524,58 @@ pub async fn api_validate_license(data: ValidateLicenseRequest) -> Result<Valida
     res.json().await.map_err(|e| map_reqwest_error(e, "License validation failed"))
 }
 
-// ---------- Agent Generate ----------
+// ---------- Agent Chat ----------
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessagePart {
+    #[serde(rename = "type")]
+    pub part_type: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub parts: Vec<MessagePart>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GenerateRequest {
-    pub prompt: String,
-    pub stream: bool,
-    pub mode: String,
-    pub include_steps: bool,
+pub struct ExecuteStep {
+    pub id: String,
+    pub description: String,
+    pub intent: String,
 }
 
-/// Flexible response: API may return result, content, or data.content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GenerateResponse {
+#[serde(rename_all = "camelCase")]
+pub struct ChatRequest {
+    pub messages: Vec<ChatMessage>,
     #[serde(default)]
-    pub result: Option<String>,
+    pub agent_mode: bool,
     #[serde(default)]
-    pub content: Option<String>,
+    pub plan_only: bool,
     #[serde(default)]
-    pub code: Option<String>,
+    pub execute_plan: bool,
     #[serde(default)]
-    pub data: Option<serde_json::Value>,
-}
-
-impl GenerateResponse {
-    /// First non-empty text field for display/editor.
-    pub fn text(&self) -> String {
-        self.result
-            .as_deref()
-            .or(self.content.as_deref())
-            .or(self.code.as_deref())
-            .unwrap_or("")
-            .to_string()
-    }
+    pub current_ui: Option<serde_json::Value>,
+    #[serde(default)]
+    pub steps: Option<Vec<ExecuteStep>>,
 }
 
 #[tauri::command]
-pub async fn api_generate(
-    prompt: String,
-    stream: bool,
-    mode: String,
-    include_steps: bool,
-) -> Result<GenerateResponse, String> {
-    if prompt.trim().is_empty() {
-        return Err("Prompt is required".into());
-    }
-    // Only non-streaming for now
-    if stream {
-        return Err("Streaming not implemented yet".into());
+pub async fn api_chat(data: ChatRequest) -> Result<serde_json::Value, String> {
+    if data.messages.is_empty() {
+        return Err("At least one message is required".into());
     }
     let base = agent_url();
-    let url = format!("{}/api/generate", base);
+    let url = format!("{}/api/chat", base);
     let body = serde_json::json!({
-        "prompt": prompt.trim(),
-        "stream": false,
-        "mode": mode.as_str(),
-        "includeSteps": false
+        "messages": data.messages,
+        "agentMode": data.agent_mode,
+        "planOnly": data.plan_only,
+        "executePlan": data.execute_plan,
+        "currentUI": data.current_ui,
+        "steps": data.steps
     });
     let client = Client::new();
     let res = client
@@ -496,62 +584,93 @@ pub async fn api_generate(
         .json(&body)
         .send()
         .await
-        .map_err(|e| map_reqwest_error(e, "Generate failed"))?;
+        .map_err(|e| map_agent_connection_error(e, &base))?;
+    let status = res.status();
+    let text = res.text().await.map_err(|e| map_agent_connection_error(e, &base))?;
+    if !status.is_success() {
+        eprintln!("[api_chat] {} response body: {}", status, text);
+        return Err(extract_error_message(&text, "Chat failed"));
+    }
+    parse_sse_to_json(&text)
+}
+
+// ---------- Agent Modify ----------
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModifyRequest {
+    pub prompt: String,
+}
+
+#[tauri::command]
+pub async fn api_modify(data: ModifyRequest) -> Result<serde_json::Value, String> {
+    if data.prompt.trim().is_empty() {
+        return Err("Prompt is required".into());
+    }
+    let base = agent_url();
+    let url = format!("{}/api/modify", base);
+    let body = serde_json::json!({ "prompt": data.prompt.trim() });
+    let client = Client::new();
+    let res = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| map_agent_connection_error(e, &base))?;
     let status = res.status();
     if !status.is_success() {
         let text = res.text().await.unwrap_or_default();
-        eprintln!("[api_generate] {} response body: {}", status, text);
-        return Err(extract_error_message(&text, "Generate failed"));
+        eprintln!("[api_modify] {} response body: {}", status, text);
+        return Err(extract_error_message(&text, "Modify failed"));
     }
-    let parsed: serde_json::Value = res
-        .json()
+    decode_json_response(res, "Modify failed").await
+}
+
+// ---------- Agent Goal ----------
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoalRequest {
+    pub goal: String,
+}
+
+#[tauri::command]
+pub async fn api_goal(data: GoalRequest) -> Result<serde_json::Value, String> {
+    if data.goal.trim().is_empty() {
+        return Err("Goal is required".into());
+    }
+    let base = agent_url();
+    let url = format!("{}/api/goal", base);
+    let body = serde_json::json!({ "goal": data.goal.trim() });
+    let client = Client::new();
+    let res = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
         .await
-        .map_err(|e| map_reqwest_error(e, "Generate failed"))?;
-
-    #[cfg(debug_assertions)]
-    eprintln!("[api_generate] raw response: {}", serde_json::to_string(&parsed).unwrap_or_default());
-
-    // Helper: get first non-empty string from a value using common keys (order matters).
-    fn extract_text(v: &serde_json::Value) -> Option<String> {
-        let keys = ["result", "content", "code", "output", "response", "text", "message", "body"];
-        for key in keys {
-            if let Some(s) = v.get(key).and_then(|x| x.as_str()) {
-                if !s.trim().is_empty() {
-                    return Some(s.to_string());
-                }
-            }
-        }
-        None
+        .map_err(|e| map_agent_connection_error(e, &base))?;
+    let status = res.status();
+    if !status.is_success() {
+        let text = res.text().await.unwrap_or_default();
+        eprintln!("[api_goal] {} response body: {}", status, text);
+        return Err(extract_error_message(&text, "Goal failed"));
     }
+    decode_json_response(res, "Goal failed").await
+}
 
-    let data = parsed.get("data").cloned();
-    let result = extract_text(&parsed);
-    let (result, content, code) = if let Some(ref s) = result {
-        (Some(s.clone()), None, None)
-    } else if let Some(ref d) = data {
-        let from_data = if let Some(s) = d.as_str() {
-            if s.trim().is_empty() { None } else { Some(s.to_string()) }
-        } else {
-            extract_text(d)
-        };
-        (from_data.clone(), from_data.clone(), from_data)
-    } else {
-        (None, None, None)
-    };
-
-    // If no string field found, use the whole response body (e.g. JSON tree with type/props/children)
-    let (result, content, code) = if result.is_some() || content.is_some() || code.is_some() {
-        (result, content, code)
-    } else if let Ok(full) = serde_json::to_string_pretty(&parsed) {
-        (Some(full.clone()), Some(full.clone()), Some(full))
-    } else {
-        (result, content, code)
-    };
-
-    Ok(GenerateResponse {
-        result,
-        content,
-        code,
-        data,
-    })
+// ---------- Agent Health (for frontend to verify backend is running and configured) ----------
+#[tauri::command]
+pub async fn api_agent_health() -> Result<serde_json::Value, String> {
+    let base = agent_url();
+    let url = format!("{}/api/health", base);
+    let client = Client::new();
+    let res = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| map_agent_connection_error(e, &base))?;
+    let status = res.status();
+    let text = res.text().await.map_err(|e| map_agent_connection_error(e, &base))?;
+    if !status.is_success() {
+        return Err(format!("Health check failed: {} {}", status, text));
+    }
+    serde_json::from_str(&text).map_err(|e| format!("Invalid health response: {}", e))
 }

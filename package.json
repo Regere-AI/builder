@@ -4,11 +4,14 @@
   "description": "Regere Builder",
   "type": "module",
   "scripts": {
+    "postinstall": "npm install --prefix backend && npm install --prefix shared",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "backend:start": "cd backend && npm run start",
+    "tauri:dev": "concurrently \"npm run backend:start\" \"tauri dev\"",
+    "tauri:dev:frontend": "tauri dev",
     "tauri:build": "tauri build",
     "build:mac": "node -e \"if(process.platform!=='darwin'){console.error('Build for macOS must be run on macOS');process.exit(1)}\" && tauri build",
     "build:win": "node -e \"if(process.platform!=='win32'){console.error('Build for Windows must be run on Windows');process.exit(1)}\" && tauri build"
@@ -22,6 +25,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "concurrently": "^9.1.2",
     "@tauri-apps/cli": "^2",
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.43",
