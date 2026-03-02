@@ -5,7 +5,10 @@ import { EditorView } from './EditorView'
 import { JsonSplitView } from './JsonSplitView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
 import { BuilderSettingsView } from './BuilderSettingsView'
-import { LayoutRenderer, defaultLayoutRegistry, type LayoutNode } from './LayoutRenderer'
+import type { Spec } from '@json-render/core'
+import { Renderer, StateProvider, VisibilityProvider, ActionProvider } from '@json-render/react'
+import { registry } from '@/lib/json-render/registry'
+import { parseToSpec, isJsonRenderSpec } from '@/lib/json-render/layout-to-spec'
 
 export const SETTINGS_TAB_PATH = 'builder://settings'
 import { openFile as desktopOpenFile, saveFile as desktopSaveFile, appWriteTextFile, isTauri } from '@/desktop'
@@ -13,14 +16,8 @@ import type { ActiveApp } from './IDELayout'
 import type { AgentResponsePayload } from './ChatPanel'
 import type { GetEditorSelection, EditorSelectionPayload } from './EditorView'
 
-function parseLayoutJson(content: string): LayoutNode | null {
-  try {
-    const node = JSON.parse(content)
-    if (node && typeof node === 'object' && node.type) return node as LayoutNode
-    return null
-  } catch {
-    return null
-  }
+function parseLayoutOrSpec(content: string): ReturnType<typeof parseToSpec> {
+  return parseToSpec(content)
 }
 import { Menu, Submenu, MenuItem, PredefinedMenuItem, CheckMenuItem } from '@tauri-apps/api/menu'
 import { listen } from '@tauri-apps/api/event'
@@ -609,6 +606,8 @@ export function BuilderDashboard({
           setOpenFiles((prev) => [...prev, newFile])
           setActiveFile(newFile)
         }
+        // Show the UI preview when opening generated.json from agent so the rendering tree is visible
+        if (relativePath === 'uiConfigs/generated.json') setShowPreview(true)
         onAgentResponseProcessed?.()
       }
       writeAndOpen()
@@ -622,8 +621,26 @@ export function BuilderDashboard({
   }, [activeFile?.path])
 
   const isJsonFile = activeFile?.path?.toLowerCase().endsWith('.json')
-  const layoutNode = activeFile && isJsonFile ? parseLayoutJson(activeFile.content) : null
-  const showLayoutPreview = showPreview && isJsonFile && layoutNode
+  const layoutSpecFromFile = activeFile && isJsonFile ? parseLayoutOrSpec(activeFile.content) : null
+  // When agent just returned code for generated.json, use that spec so the UI tree renders even before file is focused
+  const generatedSpecFromAgent =
+    agentResponse?.type === 'code' &&
+    agentResponse.content?.filePath === 'uiConfigs/generated.json' &&
+    agentResponse.content?.code
+      ? (() => {
+          try {
+            const parsed = JSON.parse(agentResponse.content.code) as unknown
+            return isJsonRenderSpec(parsed) ? parsed : null
+          } catch {
+            return parseToSpec(agentResponse.content.code)
+          }
+        })()
+      : null
+  const layoutSpec = layoutSpecFromFile ?? generatedSpecFromAgent
+  const isGeneratedJson = agentResponse?.content?.filePath === 'uiConfigs/generated.json'
+  const showLayoutPreview =
+    !!layoutSpec &&
+    (showPreview && isJsonFile ? true : agentResponse?.type === 'code' && !!isGeneratedJson)
 
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
   const configShortcut = isMac ? '⌘1' : 'Ctrl+1'
@@ -700,10 +717,16 @@ export function BuilderDashboard({
           showLayoutPreview ? (
             <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e]">
               <div className="min-h-full rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
-                <LayoutRenderer node={layoutNode!} registry={defaultLayoutRegistry} />
+                <StateProvider initialState={{}}>
+                  <VisibilityProvider>
+                    <ActionProvider handlers={{}}>
+                      <Renderer spec={layoutSpec as Spec} registry={registry} />
+                    </ActionProvider>
+                  </VisibilityProvider>
+                </StateProvider>
               </div>
             </div>
-          ) : layoutNode === null && showPreview && isJsonFile ? (
+          ) : layoutSpec === null && showPreview && isJsonFile ? (
             <div className="flex-1 flex items-center justify-center p-8 text-gray-400">
               Invalid layout JSON. Ensure the file has a root object with a <code className="bg-[#3e3e3e] px-1 rounded">type</code> field.
             </div>

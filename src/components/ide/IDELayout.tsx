@@ -109,6 +109,7 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
           width={chatPanelWidth}
           onWidthChange={setChatPanelWidth}
           onAgentResponse={setAgentResponse}
+          appRootPath={activeApp?.rootPath ?? null}
           pendingContext={pendingChatContext}
           onConsumePendingContext={handleConsumePendingContext}
         />

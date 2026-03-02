@@ -11,6 +11,8 @@
     "tauri:dev": "concurrently \"tauri dev\"",
     "tauri:dev:frontend": "tauri dev",
     "tauri:build": "tauri build",
+    "chat:server": "tsx src/server/chat.ts",
+    "dev:with-chat": "concurrently \"vite\" \"npm run chat:server\"",
     "build:mac": "export NODE_OPTIONS='--disable-warning=DEP0147' && node -e \"if(process.platform!=='darwin'){console.error('Build for macOS must be run on macOS');process.exit(1)}\" && tauri build",
     "build:win": "node -e \"if(process.platform!=='win32'){console.error('Build for Windows must be run on Windows');process.exit(1)}\" && tauri build"
   },
@@ -34,11 +36,16 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "tailwindcss": "^3.4.19",
+    "tsx": "^4.21.0",
     "typescript": "^5.3.3",
     "vite": "^7.3.1",
     "vite-plugin-monaco-editor": "^1.1.0"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.50",
+    "@ai-sdk/google": "^3.0.34",
+    "@ai-sdk/openai": "^3.0.37",
+    "@ai-sdk/react": "^3.0.107",
     "@json-render/core": "^0.11.0",
     "@json-render/react": "^0.11.0",
     "@json-render/redux": "^0.11.0",
@@ -53,14 +60,14 @@
     "@visual-json/core": "0.2.0",
     "@visual-json/react": "^0.2.0",
     "ai": "^6.0.105",
-    "zod": "^4.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "lucide-react": "^0.563.0",
     "monaco-editor": "^0.45.0",
     "react-arborist": "^3.4.3",
-    "tailwind-merge": "^3.4.0"
+    "tailwind-merge": "^3.4.0",
+    "zod": "^4.0.0"
   },
   "overrides": {
     "@visual-json/core": "0.2.0"
