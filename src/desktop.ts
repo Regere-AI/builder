@@ -105,13 +105,33 @@ export interface GenerateOptions {
   includeSteps?: boolean
   /** Model/provider: openai, anthropic, google. */
   model?: string
+// ----- Agent APIs (chat, modify, goal) -----
 }
 
-export interface GenerateResponse {
-  result?: string
-  content?: string
-  code?: string
-  data?: unknown
+
+export interface MessagePart {
+  type: string
+  text: string
+}
+
+export interface ChatMessage {
+  role: string
+  parts: MessagePart[]
+}
+
+export interface ExecuteStep {
+  id: string
+  description: string
+  intent: string
+}
+
+export interface ChatRequest {
+  messages: ChatMessage[]
+  agentMode?: boolean
+  planOnly?: boolean
+  executePlan?: boolean
+  currentUI?: unknown
+  steps?: ExecuteStep[]
 }
 
 const TEXT_KEYS = ['result', 'content', 'code', 'output', 'response', 'text', 'message', 'body'] as const
@@ -128,22 +148,81 @@ function getTextFromValue(v: unknown): string {
   return ''
 }
 
-/** Get first non-empty text from generate response. */
-export function getGenerateResponseText(r: GenerateResponse): string {
-  const top = getTextFromValue(r) || (r.result ?? r.content ?? r.code ?? '')
-  if (top) return top
-  return getTextFromValue(r.data) ?? ''
+/** Get first non-empty text from chat/modify/goal response (generic object). */
+export function getAgentResponseText(r: unknown): string {
+  if (typeof r === 'string' && r.trim()) return r
+  if (r && typeof r === 'object' && !Array.isArray(r)) {
+    const top = getTextFromValue(r)
+    if (top) return top
+    const o = r as Record<string, unknown>
+    const fromData = getTextFromValue(o.data)
+    if (fromData) return fromData
+    // Backend often returns { ui } without content; show the generated UI JSON
+    const ui = o.ui
+    if (ui != null && typeof ui === 'object') {
+      try {
+        return JSON.stringify(ui, null, 2)
+      } catch {
+        return 'UI generated.'
+      }
+    }
+  }
+  return ''
 }
 
-export async function generate(
-  prompt: string,
-  options?: GenerateOptions
-): Promise<GenerateResponse> {
-  return invoke<GenerateResponse>('api_generate', {
-    prompt: prompt.trim(),
-    stream: options?.stream ?? false,
-    mode: options?.mode ?? 'generator',
-    includeSteps: options?.includeSteps ?? false,
-    model: options?.model ?? undefined,
+export async function chat(data: ChatRequest): Promise<unknown> {
+  return invoke<unknown>('api_chat', {
+    data: {
+      messages: data.messages,
+      agentMode: data.agentMode ?? false,
+      planOnly: data.planOnly ?? false,
+      executePlan: data.executePlan ?? false,
+      currentUI: data.currentUI ?? null,
+      steps: data.steps ?? null,
+    },
   })
+}
+
+export interface ModifyRequest {
+  prompt: string
+}
+
+export async function modify(data: ModifyRequest): Promise<unknown> {
+  return invoke<unknown>('api_modify', { data })
+}
+
+export interface GoalRequest {
+  goal: string
+}
+
+export async function goal(data: GoalRequest): Promise<unknown> {
+  return invoke<unknown>('api_goal', { data })
+}
+
+/** Check if the agent backend is running and configured (OPENAI_API_KEY). */
+export async function agentHealthCheck(): Promise<{ ok: boolean; configured?: boolean; message?: string }> {
+  try {
+    const data = await invoke<{ status?: string; configured?: boolean; hint?: string }>('api_agent_health')
+    return {
+      ok: data?.status === 'ok',
+      configured: data?.configured,
+      message: data?.hint,
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, message: msg }
+  }
+}
+
+/** True if the response looks like an empty layout (container with no children). */
+export function isEmptyLayoutResponse(r: unknown): boolean {
+  if (r == null || typeof r !== 'object') return false
+  const o = r as Record<string, unknown>
+  const ui = o.ui ?? o
+  if (ui == null || typeof ui !== 'object') return false
+  const u = ui as Record<string, unknown>
+  const type = u.type as string
+  const children = u.children
+  if (type !== 'container' && type !== 'flex') return false
+  return Array.isArray(children) && children.length === 0
 }

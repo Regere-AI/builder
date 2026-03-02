@@ -1,0 +1,23 @@
+{
+  "name": "@ui-builder/shared",
+  "version": "1.0.0",
+  "description": "Shared schema, types, and utilities for UI Builder backend and frontend",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./schema": "./schema/index.ts",
+    "./chat-types": "./chat-types.ts",
+    "./componentNames": "./componentNames.ts",
+    "./component-prompt-mapping": "./component-prompt-mapping.ts",
+    "./component-render-defaults": "./component-render-defaults.ts",
+    "./children-to-data": "./children-to-data.ts",
+    "./core/registry/types": "./core/registry/types.ts"
+  },
+  "devDependencies": {
+    "zod": "^3.22.4"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  }
+}
