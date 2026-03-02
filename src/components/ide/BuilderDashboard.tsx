@@ -4,7 +4,12 @@ import { Button } from '../ui/button'
 import { EditorView } from './EditorView'
 import { JsonSplitView } from './JsonSplitView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
-import { LayoutRenderer, defaultLayoutRegistry, type LayoutNode } from './LayoutRenderer'
+import { BuilderSettingsView } from './BuilderSettingsView'
+import { Renderer, StateProvider, VisibilityProvider, ActionProvider } from '@json-render/react'
+import { layoutNodeToSpec, type LayoutNode } from '@/lib/layoutSpec'
+import { jsonRenderRegistry, JsonRenderFallback } from './JsonRenderRegistry'
+
+export const SETTINGS_TAB_PATH = 'builder://settings'
 import { openFile as desktopOpenFile, saveFile as desktopSaveFile, appWriteTextFile, isTauri } from '@/desktop'
 import type { ActiveApp } from './IDELayout'
 import type { AgentResponsePayload } from './ChatPanel'
@@ -203,6 +208,22 @@ export function BuilderDashboard({
     }
   }
 
+  const handleOpenBuilderSettings = () => {
+    const existing = openFiles.find((f) => f.path === SETTINGS_TAB_PATH)
+    if (existing) {
+      setActiveFile(existing)
+      return
+    }
+    const settingsFile: EditorFile = {
+      path: SETTINGS_TAB_PATH,
+      name: 'Builder Settings',
+      content: '',
+      isModified: false,
+    }
+    setOpenFiles((prev) => [...prev, settingsFile])
+    setActiveFile(settingsFile)
+  }
+
   const handleFileChange = (value: string) => {
     if (!activeFile) return
 
@@ -245,6 +266,7 @@ export function BuilderDashboard({
 
   const handleSave = async () => {
     if (!activeFile) return
+    if (activeFile.path === SETTINGS_TAB_PATH) return
     if (!isTauri()) return
     try {
       const result = await desktopSaveFile(activeFile.content, activeFile.path)
@@ -271,6 +293,7 @@ export function BuilderDashboard({
 
   const handleSaveAs = async () => {
     if (!activeFile) return
+    if (activeFile.path === SETTINGS_TAB_PATH) return
     if (!isTauri()) return
     try {
       const result = await desktopSaveFile(activeFile.content)
@@ -295,8 +318,8 @@ export function BuilderDashboard({
     }
   }
 
-  const handlersRef = useRef({ handleNewFile, handleOpenFile, handleSave, handleSaveAs })
-  handlersRef.current = { handleNewFile, handleOpenFile, handleSave, handleSaveAs }
+  const handlersRef = useRef({ handleNewFile, handleOpenFile, handleSave, handleSaveAs, handleOpenBuilderSettings })
+  handlersRef.current = { handleNewFile, handleOpenFile, handleSave, handleSaveAs, handleOpenBuilderSettings }
 
   // Debounce menu/shortcut handlers so duplicate events (e.g. shortcut + menu) only run once
   const menuLastCallRef = useRef<Record<string, number>>({})
@@ -381,6 +404,11 @@ export function BuilderDashboard({
           })
         },
       })
+      const builderSettingsItem = await MenuItem.new({
+        id: 'builder-settings',
+        text: 'Builder Settings',
+        action: () => runOnce('builder-settings', () => handlersRef.current.handleOpenBuilderSettings()),
+      })
       const quitItem = await MenuItem.new({
         id: 'quit',
         text: isMac ? 'Quit' : 'Exit',
@@ -390,7 +418,7 @@ export function BuilderDashboard({
 
       const fileSubmenu = await Submenu.new({
         text: 'File',
-        items: [newItem, openItem, separator, saveItem, saveAsItem, separator, autoSaveItem, separator, quitItem],
+        items: [newItem, openItem, separator, saveItem, saveAsItem, separator, autoSaveItem, separator, builderSettingsItem, separator, quitItem],
       })
 
       const undoItem = await PredefinedMenuItem.new({ item: 'Undo' })
@@ -668,11 +696,19 @@ export function BuilderDashboard({
           <div className="flex-1 flex items-center justify-center p-8 text-gray-300">
             Agent Response Viewer (to be implemented)
           </div>
+        ) : activeFile?.path === SETTINGS_TAB_PATH ? (
+          <BuilderSettingsView user={user} />
         ) : activeFile ? (
           showLayoutPreview ? (
             <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e]">
               <div className="min-h-full rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
-                <LayoutRenderer node={layoutNode!} registry={defaultLayoutRegistry} />
+                <StateProvider initialState={{}}>
+                  <VisibilityProvider>
+                    <ActionProvider handlers={{}}>
+                      <Renderer spec={layoutNodeToSpec(layoutNode!) ?? null} registry={jsonRenderRegistry} fallback={JsonRenderFallback} />
+                    </ActionProvider>
+                  </VisibilityProvider>
+                </StateProvider>
               </div>
             </div>
           ) : layoutNode === null && showPreview && isJsonFile ? (

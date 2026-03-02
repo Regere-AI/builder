@@ -321,3 +321,41 @@ export function launchpadGet(id: string): (LaunchpadConfig & { password: string 
       }
     : null
 }
+
+// ----- Builder settings (API keys, stored in localStorage like launchpad) -----
+
+const BUILDER_SETTINGS_STORAGE_KEY = 'builder_settings'
+
+export type BuilderModelId = 'openai' | 'anthropic' | 'google'
+
+export interface BuilderSettings {
+  openaiApiKey?: string
+  claudeApiKey?: string
+  googleApiKey?: string
+  /** Selected model for chat (default: openai). */
+  selectedModel?: BuilderModelId
+}
+
+function getBuilderSettingsStored(): BuilderSettings {
+  try {
+    const raw = localStorage.getItem(BUILDER_SETTINGS_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as BuilderSettings
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function setBuilderSettingsStored(settings: BuilderSettings) {
+  localStorage.setItem(BUILDER_SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+}
+
+export function getBuilderSettings(): BuilderSettings {
+  return getBuilderSettingsStored()
+}
+
+export function setBuilderSettings(updates: Partial<BuilderSettings>): void {
+  const current = getBuilderSettingsStored()
+  setBuilderSettingsStored({ ...current, ...updates })
+}

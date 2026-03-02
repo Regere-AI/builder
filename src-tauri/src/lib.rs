@@ -517,7 +517,11 @@ pub fn run() {
             api::api_signin,
             api::api_verify_2fa,
             api::api_validate_license,
+            api::api_chat,
             api::api_generate,
+            api::api_modify,
+            api::api_goal,
+            api::api_agent_health,
         ])
         .run(tauri::generate_context!())
     {
