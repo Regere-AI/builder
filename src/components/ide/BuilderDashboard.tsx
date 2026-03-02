@@ -5,7 +5,9 @@ import { EditorView } from './EditorView'
 import { JsonSplitView } from './JsonSplitView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
 import { BuilderSettingsView } from './BuilderSettingsView'
-import { LayoutRenderer, defaultLayoutRegistry, type LayoutNode } from './LayoutRenderer'
+import { Renderer, StateProvider, VisibilityProvider, ActionProvider } from '@json-render/react'
+import { layoutNodeToSpec, type LayoutNode } from '@/lib/layoutSpec'
+import { jsonRenderRegistry, JsonRenderFallback } from './JsonRenderRegistry'
 
 export const SETTINGS_TAB_PATH = 'builder://settings'
 import { openFile as desktopOpenFile, saveFile as desktopSaveFile, appWriteTextFile, isTauri } from '@/desktop'
@@ -700,7 +702,13 @@ export function BuilderDashboard({
           showLayoutPreview ? (
             <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e]">
               <div className="min-h-full rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
-                <LayoutRenderer node={layoutNode!} registry={defaultLayoutRegistry} />
+                <StateProvider initialState={{}}>
+                  <VisibilityProvider>
+                    <ActionProvider handlers={{}}>
+                      <Renderer spec={layoutNodeToSpec(layoutNode!) ?? null} registry={jsonRenderRegistry} fallback={JsonRenderFallback} />
+                    </ActionProvider>
+                  </VisibilityProvider>
+                </StateProvider>
               </div>
             </div>
           ) : layoutNode === null && showPreview && isJsonFile ? (
