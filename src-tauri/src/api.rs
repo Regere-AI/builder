@@ -496,6 +496,7 @@ pub async fn api_generate(
     stream: bool,
     mode: String,
     _include_steps: bool,
+    model: Option<String>,
 ) -> Result<GenerateResponse, String> {
     if prompt.trim().is_empty() {
         return Err("Prompt is required".into());
@@ -506,12 +507,15 @@ pub async fn api_generate(
     }
     let base = agent_url();
     let url = format!("{}/api/generate", base);
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "prompt": prompt.trim(),
         "stream": false,
         "mode": mode.as_str(),
         "includeSteps": false
     });
+    if let Some(m) = model.filter(|s| !s.is_empty()) {
+        body["model"] = serde_json::Value::String(m);
+    }
     let client = Client::new();
     let res = client
         .post(&url)

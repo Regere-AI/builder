@@ -103,6 +103,8 @@ export interface GenerateOptions {
   stream?: boolean
   mode?: string
   includeSteps?: boolean
+  /** Model/provider: openai, anthropic, google. */
+  model?: string
 }
 
 export interface GenerateResponse {
@@ -142,5 +144,6 @@ export async function generate(
     stream: options?.stream ?? false,
     mode: options?.mode ?? 'generator',
     includeSteps: options?.includeSteps ?? false,
+    model: options?.model ?? undefined,
   })
 }

@@ -4,7 +4,14 @@ import { Button } from '../ui/button'
 import { Select } from '../ui/select'
 import { cn } from '@/lib/utils'
 import { generate, getGenerateResponseText, isTauri } from '@/desktop'
+import { getBuilderSettings, setBuilderSettings, type BuilderModelId } from '@/services/api'
 import type { EditorSelectionPayload } from './EditorView'
+
+const MODEL_OPTIONS: { value: BuilderModelId; label: string }[] = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'google', label: 'Google' },
+]
 
 interface Message {
   id: string
@@ -38,6 +45,11 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [agentMode, setAgentMode] = useState<'Agent' | 'Plan'>('Agent')
+  const [selectedModel, setSelectedModel] = useState<BuilderModelId>(() => {
+    const stored = getBuilderSettings().selectedModel
+    if (stored === 'claude') return 'anthropic' // migrate legacy value
+    return stored ?? 'openai'
+  })
   const [panelWidth, setPanelWidth] = useState(width || DEFAULT_WIDTH)
   const [isResizing, setIsResizing] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -199,6 +211,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
           stream: false,
           mode: 'generator',
           includeSteps: false,
+          model: selectedModel,
         })
         const text = getGenerateResponseText(response)
         setMessages((prev) =>
@@ -371,18 +384,31 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
               rows={3}
               className="w-full bg-transparent border-0 outline-none px-3 py-3 text-sm text-gray-300 placeholder:text-gray-600 focus:outline-none resize-none custom-scrollbar"
             />
-          {/* Bottom Row: Agent Selector and Send Button */}
-          <div className="flex items-center justify-between p-2">
-            {/* Agent Selector */}
-            <Select
-              value={agentMode}
-              options={[
-                { value: 'Agent', label: 'Agent' },
-                { value: 'Plan', label: 'Plan' }
-              ]}
-              onChange={(value) => setAgentMode(value as 'Agent' | 'Plan')}
-              className="w-16 bg-[#2d2d2d] border border-[#3e3e3e] rounded-md "
-            />
+          {/* Bottom Row: Model, Agent/Plan, and Send Button */}
+          <div className="flex items-center justify-between gap-2 p-2">
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Model selector */}
+              <Select
+                value={selectedModel}
+                options={MODEL_OPTIONS}
+                onChange={(value) => {
+                  const model = value as BuilderModelId
+                  setSelectedModel(model)
+                  setBuilderSettings({ selectedModel: model })
+                }}
+                className="min-w-[90px] bg-[#2d2d2d] border border-[#3e3e3e] rounded-md"
+              />
+              {/* Agent / Plan selector */}
+              <Select
+                value={agentMode}
+                options={[
+                  { value: 'Agent', label: 'Agent' },
+                  { value: 'Plan', label: 'Plan' }
+                ]}
+                onChange={(value) => setAgentMode(value as 'Agent' | 'Plan')}
+                className="w-16 bg-[#2d2d2d] border border-[#3e3e3e] rounded-md"
+              />
+            </div>
 
             {/* Send Button */}
             <Button
