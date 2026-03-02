@@ -12,7 +12,8 @@ fn api_base_url() -> String {
 }
 
 fn api_key() -> Result<String, String> {
-    std::env::var("REGERE-API-KEY").map_err(|_| "REGERE-API-KEY not found in environment variables".to_string())
+    std::env::var("REGERE-API-KEY")
+        .map_err(|_| "REGERE-API-KEY not found in environment variables".to_string())
 }
 
 fn agent_url() -> String {
@@ -267,7 +268,13 @@ fn parse_sse_to_json(text: &str) -> Result<serde_json::Value, String> {
 fn extract_error_message(text: &str, fallback: &str) -> String {
     let v = match serde_json::from_str::<serde_json::Value>(text).ok() {
         Some(x) => x,
-        _ => return if text.is_empty() { fallback.into() } else { text.to_string() },
+        _ => {
+            return if text.is_empty() {
+                fallback.into()
+            } else {
+                text.to_string()
+            }
+        }
     };
     if let Some(s) = v.get("error").and_then(|m| m.as_str()) {
         return s.to_string();
@@ -338,7 +345,9 @@ pub async fn api_signup(data: SignupRequest) -> Result<SignupResponse, String> {
         eprintln!("[api_signup] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "Signup failed"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "Signup failed"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "Signup failed"))
 }
 
 #[tauri::command]
@@ -371,7 +380,9 @@ pub async fn api_send_otp(data: SendOTPRequest) -> Result<SendOTPResponse, Strin
         eprintln!("[api_send_otp] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "Failed to send OTP"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "Failed to send OTP"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "Failed to send OTP"))
 }
 
 #[tauri::command]
@@ -406,7 +417,9 @@ pub async fn api_verify_otp(data: VerifyOTPRequest) -> Result<VerifyOTPResponse,
         eprintln!("[api_verify_otp] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "OTP verification failed"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "OTP verification failed"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "OTP verification failed"))
 }
 
 /// Redact a secret for logging (show first 4 chars + "***").
@@ -457,7 +470,9 @@ pub async fn api_signin(data: SigninRequest) -> Result<SigninResponse, String> {
         eprintln!("[api_signin] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "Signin failed"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "Signin failed"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "Signin failed"))
 }
 
 #[tauri::command]
@@ -492,11 +507,15 @@ pub async fn api_verify_2fa(data: Verify2FARequest) -> Result<Verify2FAResponse,
         eprintln!("[api_verify_2fa] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "2FA verification failed"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "2FA verification failed"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "2FA verification failed"))
 }
 
 #[tauri::command]
-pub async fn api_validate_license(data: ValidateLicenseRequest) -> Result<ValidateLicenseResponse, String> {
+pub async fn api_validate_license(
+    data: ValidateLicenseRequest,
+) -> Result<ValidateLicenseResponse, String> {
     if data.license_key.trim().is_empty() {
         return Err("License key is required".into());
     }
@@ -521,7 +540,9 @@ pub async fn api_validate_license(data: ValidateLicenseRequest) -> Result<Valida
         eprintln!("[api_validate_license] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "License validation failed"));
     }
-    res.json().await.map_err(|e| map_reqwest_error(e, "License validation failed"))
+    res.json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "License validation failed"))
 }
 
 // ---------- Agent Chat ----------
@@ -538,6 +559,8 @@ pub struct ChatMessage {
     pub parts: Vec<MessagePart>,
 }
 
+// ---------- Agent Generate ----------
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecuteStep {
@@ -623,6 +646,128 @@ pub async fn api_modify(data: ModifyRequest) -> Result<serde_json::Value, String
         return Err(extract_error_message(&text, "Modify failed"));
     }
     decode_json_response(res, "Modify failed").await
+}
+
+// ---------- Agent Generate (from main) ----------
+/// Flexible response: API may return result, content, or data.content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerateResponse {
+    #[serde(default)]
+    pub result: Option<String>,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub code: Option<String>,
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
+}
+
+impl GenerateResponse {
+    /// First non-empty text field for display/editor.
+    #[allow(dead_code)]
+    pub fn text(&self) -> String {
+        self.result
+            .as_deref()
+            .or(self.content.as_deref())
+            .or(self.code.as_deref())
+            .unwrap_or("")
+            .to_string()
+    }
+}
+
+#[tauri::command]
+pub async fn api_generate(
+    prompt: String,
+    stream: bool,
+    mode: String,
+    _include_steps: bool,
+) -> Result<GenerateResponse, String> {
+    if prompt.trim().is_empty() {
+        return Err("Prompt is required".into());
+    }
+    if stream {
+        return Err("Streaming not implemented yet".into());
+    }
+    let base = agent_url();
+    let url = format!("{}/api/generate", base);
+    let body = serde_json::json!({
+        "prompt": prompt.trim(),
+        "stream": false,
+        "mode": mode.as_str(),
+        "includeSteps": false
+    });
+    let client = Client::new();
+    let res = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| map_reqwest_error(e, "Generate failed"))?;
+    let status = res.status();
+    if !status.is_success() {
+        let text = res.text().await.unwrap_or_default();
+        eprintln!("[api_generate] {} response body: {}", status, text);
+        return Err(extract_error_message(&text, "Generate failed"));
+    }
+    let parsed: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| map_reqwest_error(e, "Generate failed"))?;
+
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[api_generate] raw response: {}",
+        serde_json::to_string(&parsed).unwrap_or_default()
+    );
+
+    fn extract_text_generate(v: &serde_json::Value) -> Option<String> {
+        let keys = [
+            "result", "content", "code", "output", "response", "text", "message", "body",
+        ];
+        for key in keys {
+            if let Some(s) = v.get(key).and_then(|x| x.as_str()) {
+                if !s.trim().is_empty() {
+                    return Some(s.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    let data = parsed.get("data").cloned();
+    let result = extract_text_generate(&parsed);
+    let (result, content, code) = if let Some(ref s) = result {
+        (Some(s.clone()), None, None)
+    } else if let Some(ref d) = data {
+        let from_data = if let Some(s) = d.as_str() {
+            if s.trim().is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        } else {
+            extract_text_generate(d)
+        };
+        (from_data.clone(), from_data.clone(), from_data)
+    } else {
+        (None, None, None)
+    };
+
+    let (result, content, code) = if result.is_some() || content.is_some() || code.is_some() {
+        (result, content, code)
+    } else if let Ok(full) = serde_json::to_string_pretty(&parsed) {
+        (Some(full.clone()), Some(full.clone()), Some(full))
+    } else {
+        (result, content, code)
+    };
+
+    Ok(GenerateResponse {
+        result,
+        content,
+        code,
+        data,
+    })
 }
 
 // ---------- Agent Goal ----------

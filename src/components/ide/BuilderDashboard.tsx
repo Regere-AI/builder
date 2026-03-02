@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Folder, Code, Layout } from 'lucide-react'
 import { Button } from '../ui/button'
 import { EditorView } from './EditorView'
+import { JsonSplitView } from './JsonSplitView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
 import { LayoutRenderer, defaultLayoutRegistry, type LayoutNode } from './LayoutRenderer'
 import { openFile as desktopOpenFile, saveFile as desktopSaveFile, appWriteTextFile, isTauri } from '@/desktop'
@@ -18,7 +19,7 @@ function parseLayoutJson(content: string): LayoutNode | null {
     return null
   }
 }
-import { Menu, Submenu, MenuItem, PredefinedMenuItem } from '@tauri-apps/api/menu'
+import { Menu, Submenu, MenuItem, PredefinedMenuItem, CheckMenuItem } from '@tauri-apps/api/menu'
 import { listen } from '@tauri-apps/api/event'
 import { exit } from '@tauri-apps/plugin-process'
 
@@ -50,11 +51,21 @@ export function BuilderDashboard({
   agentResponse,
   onAddSelectionToChat,
 }: BuilderDashboardProps) {
+  const AUTO_SAVE_KEY = 'builder-auto-save'
   const [openFiles, setOpenFiles] = useState<EditorFile[]>([])
   const [activeFile, setActiveFile] = useState<EditorFile | null>(null)
   const [showPreview, setShowPreview] = useState(false)
+  const [autoSave, setAutoSave] = useState(() => {
+    try {
+      return localStorage.getItem(AUTO_SAVE_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
   const openFilesRef = useRef<EditorFile[]>([])
   openFilesRef.current = openFiles
+  const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingAutoSaveRef = useRef<{ path: string; content: string } | null>(null)
   const getEditorSelectionRef = useRef<GetEditorSelection>(() => null)
   const onAddSelectionToChatRef = useRef(onAddSelectionToChat)
   onAddSelectionToChatRef.current = onAddSelectionToChat
@@ -76,6 +87,13 @@ export function BuilderDashboard({
     registerOpenFileFromSidebar(handler)
     return () => registerOpenFileFromSidebar(() => {})
   }, [registerOpenFileFromSidebar])
+
+  // Clear auto-save timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current)
+    }
+  }, [])
 
   // Close tabs when files/folders are deleted from the sidebar
   useEffect(() => {
@@ -198,6 +216,31 @@ export function BuilderDashboard({
     setActiveFile((prev) =>
       prev ? { ...prev, content: value, isModified: true } : null
     )
+
+    // Auto-save: debounced write to disk when enabled (only for files with a real path)
+    if (autoSave && isTauri() && (activeFile.path.includes('/') || activeFile.path.includes('\\'))) {
+      if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current)
+      pendingAutoSaveRef.current = { path: activeFile.path, content: value }
+      autoSaveTimeoutRef.current = setTimeout(async () => {
+        const pending = pendingAutoSaveRef.current
+        autoSaveTimeoutRef.current = null
+        pendingAutoSaveRef.current = null
+        if (!pending) return
+        try {
+          await appWriteTextFile(pending.path, pending.content)
+          setOpenFiles((prev) =>
+            prev.map((f) =>
+              f.path === pending.path ? { ...f, isModified: false } : f
+            )
+          )
+          setActiveFile((prev) =>
+            prev?.path === pending.path ? { ...prev, isModified: false } : prev
+          )
+        } catch (e) {
+          console.error('Auto-save failed:', e)
+        }
+      }, 800)
+    }
   }
 
   const handleSave = async () => {
@@ -322,6 +365,22 @@ export function BuilderDashboard({
         action: () => runOnce('save-as', () => handlersRef.current.handleSaveAs()),
       })
       const separator = await PredefinedMenuItem.new({ item: 'Separator' })
+      const autoSaveItem = await CheckMenuItem.new({
+        id: 'auto-save',
+        text: 'Auto Save',
+        checked: autoSave,
+        action: () => {
+          setAutoSave((prev) => {
+            const next = !prev
+            try {
+              localStorage.setItem(AUTO_SAVE_KEY, next ? 'true' : 'false')
+            } catch {
+              // ignore
+            }
+            return next
+          })
+        },
+      })
       const quitItem = await MenuItem.new({
         id: 'quit',
         text: isMac ? 'Quit' : 'Exit',
@@ -331,7 +390,7 @@ export function BuilderDashboard({
 
       const fileSubmenu = await Submenu.new({
         text: 'File',
-        items: [newItem, openItem, separator, saveItem, saveAsItem, separator, quitItem],
+        items: [newItem, openItem, separator, saveItem, saveAsItem, separator, autoSaveItem, separator, quitItem],
       })
 
       const undoItem = await PredefinedMenuItem.new({ item: 'Undo' })
@@ -478,7 +537,7 @@ export function BuilderDashboard({
     return () => {
       mounted = false
     }
-  }, [])
+  }, [autoSave])
 
   // Handle agent responses - open files from agent (write to uiConfigs when activeApp is set)
   useEffect(() => {
@@ -540,6 +599,28 @@ export function BuilderDashboard({
   const layoutNode = activeFile && isJsonFile ? parseLayoutJson(activeFile.content) : null
   const showLayoutPreview = showPreview && isJsonFile && layoutNode
 
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
+  const configShortcut = isMac ? '⌘1' : 'Ctrl+1'
+  const previewShortcut = isMac ? '⌘2' : 'Ctrl+2'
+
+  // Cmd+1 / Ctrl+1 → Configuration, Cmd+2 / Ctrl+2 → Preview (when JSON file is active)
+  useEffect(() => {
+    if (!activeFile || !isJsonFile) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod || e.altKey || e.shiftKey) return
+      if (e.key === '1') {
+        e.preventDefault()
+        setShowPreview(false)
+      } else if (e.key === '2') {
+        e.preventDefault()
+        setShowPreview(true)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [activeFile, isJsonFile])
+
   return (
     <div className="flex-1 bg-[#1e1e1e] flex flex-col overflow-hidden">
       {/* Editor Tabs */}
@@ -560,18 +641,22 @@ export function BuilderDashboard({
             size="sm"
             className={`text-sm ${!showPreview ? 'bg-[#3e3e3e] text-white' : 'text-gray-400 hover:text-gray-200'}`}
             onClick={() => setShowPreview(false)}
+            title={`Configuration (${configShortcut})`}
           >
             <Code className="w-4 h-4 mr-1" />
-            Code
+            Configuration
+            <span className="ml-1.5 opacity-60 text-xs font-normal">{configShortcut}</span>
           </Button>
           <Button
             variant="ghost"
             size="sm"
             className={`text-sm ${showPreview ? 'bg-[#3e3e3e] text-white' : 'text-gray-400 hover:text-gray-200'}`}
             onClick={() => setShowPreview(true)}
+            title={`Preview (${previewShortcut})`}
           >
             <Layout className="w-4 h-4 mr-1" />
             Preview
+            <span className="ml-1.5 opacity-60 text-xs font-normal">{previewShortcut}</span>
           </Button>
         </div>
       )}
@@ -594,6 +679,13 @@ export function BuilderDashboard({
             <div className="flex-1 flex items-center justify-center p-8 text-gray-400">
               Invalid layout JSON. Ensure the file has a root object with a <code className="bg-[#3e3e3e] px-1 rounded">type</code> field.
             </div>
+          ) : isJsonFile ? (
+            <JsonSplitView
+              file={activeFile}
+              onChange={handleFileChange}
+              onSave={handleSave}
+              onRegisterGetSelection={(getter) => { getEditorSelectionRef.current = getter }}
+            />
           ) : (
             <EditorView
               file={activeFile}

@@ -4,8 +4,8 @@ mod api;
 
 use serde::Serialize;
 use std::fs;
-use tauri::Manager;
 use tauri::Emitter;
+use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 #[derive(Debug, Serialize)]
@@ -199,7 +199,9 @@ fn app_rename(old_path: String, new_name: String) -> Result<(), String> {
     if !old.exists() {
         return Err(format!("Path does not exist: {}", old_path));
     }
-    let parent = old.parent().ok_or_else(|| "Invalid path (no parent)".to_string())?;
+    let parent = old
+        .parent()
+        .ok_or_else(|| "Invalid path (no parent)".to_string())?;
     let new_path = parent.join(new_name);
     fs::rename(old, &new_path).map_err(|e| e.to_string())
 }
@@ -215,7 +217,9 @@ fn app_move(from_path: String, to_dir_path: String) -> Result<(), String> {
     if !to_dir.is_dir() {
         return Err(format!("Destination is not a directory: {}", to_dir_path));
     }
-    let name = from.file_name().ok_or_else(|| "Invalid source path".to_string())?;
+    let name = from
+        .file_name()
+        .ok_or_else(|| "Invalid source path".to_string())?;
     let dest = to_dir.join(name);
     if dest.exists() {
         return Err(format!("Destination already exists: {}", dest.display()));
@@ -301,7 +305,9 @@ async fn save_file(
     content: String,
     default_path: Option<String>,
 ) -> SaveFileResult {
-    let builder = app.dialog().file()
+    let builder = app
+        .dialog()
+        .file()
         .add_filter("JSON Files", &["json"])
         .add_filter("Text Files", &["txt"])
         .add_filter("All Files", &["*"]);
@@ -381,7 +387,9 @@ fn ensure_env_from_file(env_path: &std::path::Path) {
                 "REGERE-API-KEY" if std::env::var("REGERE-API-KEY").is_err() => {
                     std::env::set_var("REGERE-API-KEY", value);
                 }
-                "STACK_GUARD_API_BASE_URL" if std::env::var("STACK_GUARD_API_BASE_URL").is_err() => {
+                "STACK_GUARD_API_BASE_URL"
+                    if std::env::var("STACK_GUARD_API_BASE_URL").is_err() =>
+                {
                     std::env::set_var("STACK_GUARD_API_BASE_URL", value);
                 }
                 "AGENT_URL" if std::env::var("AGENT_URL").is_err() => {
@@ -405,7 +413,7 @@ pub fn run() {
         }
     }
     let _ = dotenvy::dotenv(); // then CWD so it can override
-    // Ensure hyphenated keys are set from project root .env if still missing
+                               // Ensure hyphenated keys are set from project root .env if still missing
     if let Some(root) = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent() {
         let env_path = root.join(".env");
         if env_path.exists() {
@@ -414,6 +422,7 @@ pub fn run() {
     }
 
     if let Err(e) = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
@@ -468,7 +477,10 @@ pub fn run() {
                     gs.register(Shortcut::new(Some(Modifiers::META), Code::KeyN))?;
                     gs.register(Shortcut::new(Some(Modifiers::META), Code::KeyO))?;
                     gs.register(Shortcut::new(Some(Modifiers::META), Code::KeyS))?;
-                    gs.register(Shortcut::new(Some(Modifiers::META | Modifiers::SHIFT), Code::KeyS))?;
+                    gs.register(Shortcut::new(
+                        Some(Modifiers::META | Modifiers::SHIFT),
+                        Code::KeyS,
+                    ))?;
                     gs.register(Shortcut::new(Some(Modifiers::META), Code::KeyL))?;
                 }
                 #[cfg(not(target_os = "macos"))]
@@ -476,7 +488,10 @@ pub fn run() {
                     gs.register(Shortcut::new(Some(Modifiers::CONTROL), Code::KeyN))?;
                     gs.register(Shortcut::new(Some(Modifiers::CONTROL), Code::KeyO))?;
                     gs.register(Shortcut::new(Some(Modifiers::CONTROL), Code::KeyS))?;
-                    gs.register(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS))?;
+                    gs.register(Shortcut::new(
+                        Some(Modifiers::CONTROL | Modifiers::SHIFT),
+                        Code::KeyS,
+                    ))?;
                     gs.register(Shortcut::new(Some(Modifiers::CONTROL), Code::KeyL))?;
                 }
             }
@@ -503,6 +518,7 @@ pub fn run() {
             api::api_verify_2fa,
             api::api_validate_license,
             api::api_chat,
+            api::api_generate,
             api::api_modify,
             api::api_goal,
             api::api_agent_health,

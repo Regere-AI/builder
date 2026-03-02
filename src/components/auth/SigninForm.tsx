@@ -4,6 +4,10 @@ import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { signin, sendOTP } from '@/services/api'
 import { Mail, Lock, Loader2 } from 'lucide-react'
+import { openUrl } from '@tauri-apps/plugin-opener'
+import { isTauri } from '@/desktop'
+
+const FORGOT_PASSWORD_URL = 'https://accounts.regere.ai/forgot-password'
 
 interface SigninFormProps {
   onSigninSuccess: (email: string) => void
@@ -136,6 +140,21 @@ export function SigninForm({ onSigninSuccess, onError }: SigninFormProps) {
             {errors.password && (
               <p className="text-sm text-red-400">{errors.password}</p>
             )}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={async () => {
+                  if (isTauri()) {
+                    await openUrl(FORGOT_PASSWORD_URL)
+                  } else {
+                    window.open(FORGOT_PASSWORD_URL, '_blank', 'noopener,noreferrer')
+                  }
+                }}
+                className="text-sm text-[#007acc] hover:text-[#005a9e] hover:underline focus:outline-none focus:underline"
+              >
+                Forgot password?
+              </button>
+            </div>
           </div>
         </div>
 
