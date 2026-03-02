@@ -8,8 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-
-    "tauri:dev": "concurrently \"npm run backend:start\" \"tauri dev\"",
+    "tauri:dev": "concurrently \"tauri dev\"",
     "tauri:dev:frontend": "tauri dev",
     "tauri:build": "tauri build",
     "build:mac": "export NODE_OPTIONS='--disable-warning=DEP0147' && node -e \"if(process.platform!=='darwin'){console.error('Build for macOS must be run on macOS');process.exit(1)}\" && tauri build",
