@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Rocket, Plus, X, Mail, Check, Globe, Pencil, Trash2, Search, FolderOpen } from 'lucide-react'
+import { Rocket, Plus, X, Mail, Check, Globe, Pencil, Trash2, Search, FolderOpen, GitBranch } from 'lucide-react'
 import { Button } from '../ui/button'
 import {
   launchpadList,
@@ -10,7 +10,7 @@ import {
   type LaunchpadConfig,
   type LaunchpadEnvironment,
 } from '@/services/api'
-import { openAppFolder, isTauri } from '@/desktop'
+import { openAppFolder, getDefaultWorkspaceRoot, gitClone, isTauri } from '@/desktop'
 import { cn } from '@/lib/utils'
 
 const DEFAULT_COLOR = '#007acc'
@@ -27,6 +27,29 @@ function getHostLabel(url: string): string {
   } catch {
     return url.replace(/^https?:\/\//, '').replace(/\/$/, '').slice(0, 32) || 'Launchpad'
   }
+}
+
+/** Derive folder name from repo URL, e.g. owner-repo */
+function getRepoFolderName(url: string): string | null {
+  const trimmed = url.trim()
+  if (!trimmed) return null
+  try {
+    if (trimmed.startsWith('git@')) {
+      const match = trimmed.match(/[:/]([^/]+)\/([^/]+?)(?:\.git)?$/)
+      if (match) return `${match[1]}-${match[2]}`
+    }
+    const u = new URL(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`)
+    const path = u.pathname.replace(/^\//, '').replace(/\.git$/, '').replace(/\/$/, '')
+    const parts = path.split('/').filter(Boolean)
+    if (parts.length >= 2) return `${parts[0]}-${parts[1]}`
+    if (parts.length === 1) return parts[0]
+  } catch {
+    // fallback: take last non-empty segment
+    const segs = trimmed.split(/[/:]/).filter(Boolean)
+    if (segs.length >= 2) return `${segs[segs.length - 2]}-${segs[segs.length - 1]}`
+    if (segs.length === 1) return segs[0]
+  }
+  return null
 }
 
 interface LaunchpadSelectPageProps {
@@ -47,6 +70,10 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
   const [formError, setFormError] = useState<string | null>(null)
   const [formSubmitting, setFormSubmitting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [cloneUrl, setCloneUrl] = useState('')
+  const [cloneParentPath, setCloneParentPath] = useState<string | null>(null)
+  const [cloneLoading, setCloneLoading] = useState(false)
+  const [cloneError, setCloneError] = useState<string | null>(null)
 
   const filteredLaunchpads = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -86,6 +113,9 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
     setEditId(null)
     setForm(initialForm)
     setFormError(null)
+    setCloneUrl('')
+    setCloneParentPath(null)
+    setCloneError(null)
     setDialogOpen(true)
   }
 
@@ -111,6 +141,9 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
     setEditId(null)
     setForm(initialForm)
     setFormError(null)
+    setCloneUrl('')
+    setCloneParentPath(null)
+    setCloneError(null)
   }
 
   const handleSaveLaunchpad = async () => {
@@ -177,6 +210,54 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
       setRemoveConfirmId(null)
     } catch {
       // ignore
+    }
+  }
+
+  const handleCloneInDialog = async () => {
+    if (!isTauri()) {
+      setCloneError('Clone is only available in the desktop app.')
+      return
+    }
+    const url = cloneUrl.trim()
+    if (!url) {
+      setCloneError('Repository URL is required')
+      return
+    }
+    const folderName = getRepoFolderName(url)
+    if (!folderName) {
+      setCloneError('Could not parse repository URL. Use format: https://github.com/owner/repo')
+      return
+    }
+    setCloneLoading(true)
+    setCloneError(null)
+    try {
+      const parentDir = cloneParentPath ?? (await getDefaultWorkspaceRoot())
+      const normalized = parentDir.replace(/[/\\]+$/, '')
+      const pathSep = normalized.includes('\\') ? '\\' : '/'
+      const targetPath = `${normalized}${pathSep}${folderName}`
+      const clonedPath = await gitClone(url, targetPath)
+      setForm((f) => ({ ...f, configFolderPath: clonedPath }))
+      setFormError(null)
+    } catch (e) {
+      setCloneError(e instanceof Error ? e.message : 'Clone failed')
+    } finally {
+      setCloneLoading(false)
+    }
+  }
+
+  const handleCloneChooseFolderInDialog = async () => {
+    if (!isTauri()) {
+      setCloneError('Choose folder is only available in the desktop app.')
+      return
+    }
+    try {
+      const result = await openAppFolder()
+      if (!result.canceled && result.path) {
+        setCloneParentPath(result.path)
+        setCloneError(null)
+      }
+    } catch (e) {
+      setCloneError(e instanceof Error ? e.message : 'Failed to open folder picker')
     }
   }
 
@@ -423,6 +504,51 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
                     </div>
                   </div>
                 </div>
+                {/* Clone from GitHub - only in Add mode */}
+                {!editId && (
+                  <div className="space-y-3 rounded-lg border border-[#3e3e3e] bg-[#1e1e1e]/50 p-3 sm:col-span-2">
+                    <div className="flex items-center gap-2">
+                      <GitBranch className="w-4 h-4 text-[#007acc]" />
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Clone from GitHub</p>
+                    </div>
+                    <p className="text-xs text-gray-500">Enter a repo URL to clone. The cloned folder will be used as the config folder.</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={cloneUrl}
+                        onChange={(e) => { setCloneUrl(e.target.value); setCloneError(null) }}
+                        placeholder="https://github.com/owner/repo or git@github.com:owner/repo.git"
+                        className="flex-1 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                        disabled={cloneLoading}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCloneChooseFolderInDialog}
+                        disabled={cloneLoading}
+                        className="shrink-0 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] p-2 text-gray-400 hover:text-gray-200 hover:bg-[#3e3e3e] disabled:opacity-50"
+                        title="Choose folder for clone"
+                      >
+                        <FolderOpen className="w-5 h-5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCloneInDialog}
+                        disabled={cloneLoading || !cloneUrl.trim()}
+                        className="shrink-0 rounded-md px-4 py-2 text-sm font-medium text-white bg-[#007acc] hover:bg-[#0098e6] disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {cloneLoading ? 'Cloning…' : 'Clone'}
+                      </button>
+                    </div>
+                    {cloneParentPath && (
+                      <p className="text-xs text-gray-500 truncate" title={cloneParentPath}>
+                        Clone to: {cloneParentPath}
+                      </p>
+                    )}
+                    {cloneError && (
+                      <p className="text-sm text-red-400">{cloneError}</p>
+                    )}
+                  </div>
+                )}
                 {/* Config folder: full width */}
                 <div className="sm:col-span-2">
                   <label className="block text-sm font-medium text-gray-400 mb-1.5">Config folder path (required)</label>

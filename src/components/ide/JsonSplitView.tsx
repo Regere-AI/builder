@@ -14,8 +14,14 @@ interface File {
   content: string
 }
 
+interface DiffRange {
+  startLine: number
+  endLine: number
+}
+
 interface JsonSplitViewProps {
   file: File
+  diffRanges?: DiffRange[]
   onChange?: (value: string) => void
   onSave?: () => void
   onRegisterGetSelection?: (getSelection: GetEditorSelection) => void
@@ -37,6 +43,7 @@ const DEFAULT_JSON: JsonValue = null
 
 export function JsonSplitView({
   file,
+  diffRanges = [],
   onChange,
   onSave,
   onRegisterGetSelection,
@@ -54,15 +61,14 @@ export function JsonSplitView({
   const onRegisterRef = useRef(onRegisterGetSelection)
   onRegisterRef.current = onRegisterGetSelection
 
-  // Sync from file only when switching to a different file. When we edit (left or right),
-  // we update state in the handlers and notify parent; we must not overwrite with
-  // file.content here or the editor will reset and edits won't stick.
+  // Sync from file when switching to a different file or when content is updated externally (e.g. reload after pull/branch switch).
+  // When we edit (left or right), we update state and notify parent; parent passes back the same content so this won't overwrite.
   useEffect(() => {
     setCodeContent(file.content)
     const { value, error } = tryParseJson(file.content)
     setParseError(error)
     if (error == null) setLastValidValue(value)
-  }, [file.path])
+  }, [file.path, file.content])
 
   const handleJsonEditorChange = useCallback(
     (value: JsonValue) => {
@@ -129,6 +135,8 @@ export function JsonSplitView({
     }
   }, [])
 
+  const decorationIdsRef = useRef<string[]>([])
+
   const handleEditorDidMount = (editor: editor.IStandaloneCodeEditor) => {
     editorRef.current = editor
     onRegisterGetSelection?.(() => {
@@ -147,6 +155,41 @@ export function JsonSplitView({
       }
     })
   }
+
+  useEffect(() => {
+    const ed = editorRef.current
+    if (!ed || !diffRanges.length) return
+    const model = ed.getModel()
+    if (!model) return
+    if (decorationIdsRef.current.length > 0) {
+      ed.deltaDecorations(decorationIdsRef.current, [])
+      decorationIdsRef.current = []
+    }
+    const decorations: monaco.editor.IModelDeltaDecoration[] = diffRanges.map((range) => ({
+      range: {
+        startLineNumber: range.startLine,
+        startColumn: 1,
+        endLineNumber: range.endLine,
+        endColumn: model.getLineMaxColumn(range.endLine),
+      },
+      options: {
+        isWholeLine: true,
+        glyphMarginClassName: 'modified-line-gutter',
+        className: 'modified-line-inline',
+        overviewRuler: {
+          color: 'rgba(14, 99, 156, 0.8)',
+          position: monaco.editor.OverviewRulerLane.Left,
+        },
+      },
+    }))
+    decorationIdsRef.current = ed.deltaDecorations([], decorations)
+    return () => {
+      if (ed && decorationIdsRef.current.length > 0) {
+        ed.deltaDecorations(decorationIdsRef.current, [])
+        decorationIdsRef.current = []
+      }
+    }
+  }, [file.path, diffRanges])
 
   useEffect(() => {
     return () => {
@@ -226,6 +269,8 @@ export function JsonSplitView({
               cursorBlinking: 'smooth',
               readOnly: false,
               contextmenu: true,
+              glyphMargin: true,
+              overviewRulerLanes: 3,
             }}
             loading={
               <div className="flex items-center justify-center h-full text-gray-400">

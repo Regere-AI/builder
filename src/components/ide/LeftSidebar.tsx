@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
-import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search, Package, LayoutDashboard, GitBranch } from 'lucide-react'
+import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search, Package, LayoutDashboard, GitBranch, FileText } from 'lucide-react'
 import { Tree } from 'react-arborist'
 import type { NodeRendererProps } from 'react-arborist'
 import type { TreeApi } from 'react-arborist'
@@ -15,6 +15,7 @@ import {
   appDelete,
 } from '@/desktop'
 import type { ActiveApp } from './IDELayout'
+import { GitPanel } from './GitPanel'
 
 function pathJoin(...parts: string[]): string {
   return parts
@@ -229,9 +230,8 @@ function SidebarNode({
 
   const rowContent = (
     <div
-      style={style}
       className={cn(
-        'flex items-center gap-1 py-0.5 px-1 rounded text-left text-sm truncate cursor-pointer',
+        'flex items-center gap-1 py-0.5 px-1 rounded text-left text-sm cursor-pointer min-w-0 w-full overflow-hidden',
         isSelected ? 'bg-[#094771] hover:bg-[#094771]' : 'hover:bg-[#2a2d2e]'
       )}
       onClick={(e) => {
@@ -273,7 +273,7 @@ function SidebarNode({
           )}
         </>
       )}
-      <span className="truncate">{data.name}</span>
+      <span className="truncate min-w-0" title={data.name}>{data.name}</span>
     </div>
   )
 
@@ -337,14 +337,18 @@ function SidebarNode({
 interface LeftSidebarProps {
   expanded: boolean
   onToggle: () => void
+  sidebarView: 'files' | 'git'
+  onSidebarViewChange: (view: 'files' | 'git') => void
   activeApp: ActiveApp | null
   onOpenApp: (app: ActiveApp | null) => void
   onCloseApp: () => void
-  onOpenFile?: (path: string, content: string) => void
+  onOpenFile?: (path: string, content: string, options?: { fromGit?: boolean }) => void
   /** Called after files/folders are deleted so the editor can close them. */
   onDeletePaths?: (paths: string[]) => void
   /** Increment to refresh the file tree (e.g. after chat creates a file in the app). */
   refreshTrigger?: number
+  /** Called after Pull or branch switch so open files can be reloaded from disk. */
+  onPullOrBranchChange?: () => void
 }
 
 interface TreeNode {
@@ -357,12 +361,15 @@ interface TreeNode {
 export function LeftSidebar({
   expanded,
   onToggle,
+  sidebarView,
+  onSidebarViewChange,
   activeApp,
   onOpenApp: _onOpenApp,
   onCloseApp: _onCloseApp,
   onOpenFile,
   onDeletePaths,
   refreshTrigger,
+  onPullOrBranchChange,
 }: LeftSidebarProps) {
   const [tree, setTree] = useState<TreeNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -610,11 +617,11 @@ export function LeftSidebar({
     }
   }
 
-  const handleFileClick = async (path: string) => {
+  const handleFileClick = async (path: string, options?: { fromGit?: boolean }) => {
     if (!onOpenFile) return
     try {
       const content = await appReadTextFile(path)
-      onOpenFile(path, content)
+      onOpenFile(path, content, options)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -716,13 +723,53 @@ export function LeftSidebar({
   return (
     <div
       className={cn(
-        'bg-[#252526] border-r border-[#3e3e3e] transition-all duration-200 flex flex-col',
-        expanded ? 'w-64' : 'w-12'
+        'bg-[#252526] border-r border-[#3e3e3e] transition-all duration-200 flex',
+        expanded ? 'w-[304px]' : 'w-12'
       )}
     >
+      {/* Activity bar */}
+      <div className="w-12 shrink-0 flex flex-col border-r border-[#3e3e3e] bg-[#333333]">
+        <button
+          type="button"
+          onClick={() => { onSidebarViewChange('files'); if (!expanded) onToggle() }}
+          className={cn(
+            'flex items-center justify-center p-3 transition-colors',
+            sidebarView === 'files' ? 'bg-[#252526] text-[#007acc]' : 'text-gray-400 hover:text-gray-200 hover:bg-[#2d2d2d]'
+          )}
+          title="Explorer"
+        >
+          <FileText className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => { onSidebarViewChange('git'); if (!expanded) onToggle() }}
+          className={cn(
+            'flex items-center justify-center p-3 transition-colors',
+            sidebarView === 'git' ? 'bg-[#252526] text-[#007acc]' : 'text-gray-400 hover:text-gray-200 hover:bg-[#2d2d2d]'
+          )}
+          title="Source Control"
+        >
+          <GitBranch className="w-5 h-5" />
+        </button>
+        <div className="flex-1 min-h-0" />
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center justify-center p-3 hover:bg-[#2d2d2d] text-gray-400 hover:text-gray-200 transition-colors"
+          title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
+          <ChevronRight
+            className={cn('w-4 h-4 transition-transform', !expanded && 'rotate-180')}
+          />
+        </button>
+      </div>
+
+      {/* Content panel - Files or Git */}
       {expanded && (
-        <>
-          {activeApp && (
+        <div className="w-64 shrink-0 flex flex-col bg-[#252526] min-h-0">
+          {sidebarView === 'files' ? (
+            <>
+              {activeApp && (
             <div className="p-2 border-b border-[#3e3e3e] flex flex-col gap-2">
               <div className="flex items-center gap-1 min-w-0">
                 <span className="truncate text-sm font-medium text-gray-200" title={activeApp.name}>
@@ -768,7 +815,7 @@ export function LeftSidebar({
               <p className="text-xs text-gray-500 px-1 shrink-0">Loading…</p>
             )}
             {activeApp && !loading && (
-              <div ref={treeContainerRef} className="flex-1 min-h-0 overflow-hidden -mx-1">
+              <div ref={treeContainerRef} className="sidebar-tree-container flex-1 min-h-0 overflow-hidden -mx-1">
                 <Tree<TreeNode>
                   ref={(api) => {
                     treeRef.current = api ?? null
@@ -833,21 +880,24 @@ export function LeftSidebar({
               </div>
             )}
           </div>
-        </>
+            </>
+          ) : (
+            <GitPanel
+              isOpen={true}
+              onClose={() => onSidebarViewChange('files')}
+              repoPath={activeApp?.rootPath ?? null}
+              embedded
+              refreshTrigger={refreshTrigger}
+              onPullOrBranchChange={onPullOrBranchChange}
+              onOpenFileFromGit={(relativePath) => {
+                if (!activeApp?.rootPath || !onOpenFile) return
+                const fullPath = `${activeApp.rootPath}/${relativePath}`.replace(/\\/g, '/')
+                handleFileClick(fullPath, { fromGit: true })
+              }}
+            />
+          )}
+        </div>
       )}
-
-      <div className="border-t border-[#3e3e3e] p-2 shrink-0">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="w-full flex items-center justify-center p-2 hover:bg-[#2a2d2e] rounded transition-colors"
-          title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
-        >
-          <ChevronRight
-            className={cn('w-4 h-4 transition-transform', !expanded && 'rotate-180')}
-          />
-        </button>
-      </div>
 
       {/* Create new file type dialog */}
       {showCreateFileDialog && (
