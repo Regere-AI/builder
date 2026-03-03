@@ -101,7 +101,16 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
         const unlisten = await listenFileChanged(({ payload }) => {
           if (cancelled) return
           if (!Array.isArray(payload) || payload.length === 0) return
-          // Trigger sidebar and Git panel refresh
+
+          // Ignore pure .git internal changes (commits, pushes) so the Git panel
+          // doesn't spam "Checking repository…" while Git writes its own metadata.
+          const hasNonGitChange = payload.some((p) => {
+            const lower = p.toLowerCase()
+            return !lower.includes('\\.git\\') && !lower.includes('/.git/')
+          })
+          if (!hasNonGitChange) return
+
+          // Trigger sidebar and Git panel refresh for real workspace file changes
           setSidebarRefreshTrigger((n) => n + 1)
           // Trigger diff refresh in BuilderDashboard
           setFileChangeTrigger((n) => n + 1)
@@ -175,7 +184,16 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
       </div>
 
       {/* Status Bar */}
-      <StatusBar onLogout={onLogout} selectedLaunchpad={selectedLaunchpad} onSwitchLaunchpad={onSwitchLaunchpad} />
+      <StatusBar
+        onLogout={onLogout}
+        selectedLaunchpad={selectedLaunchpad}
+        onSwitchLaunchpad={onSwitchLaunchpad}
+        repoPath={activeApp?.rootPath ?? null}
+        onBranchChanged={() => {
+          setSidebarRefreshTrigger((n) => n + 1)
+          setFileChangeTrigger((n) => n + 1)
+        }}
+      />
     </div>
   )
 }

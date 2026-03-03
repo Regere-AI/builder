@@ -125,6 +125,16 @@ export async function gitStatus(repoPath: string): Promise<GitStatusResult> {
   return invoke<GitStatusResult>('git_status', { repoPath })
 }
 
+/** True if the current branch has an upstream tracking branch. */
+export async function gitHasUpstream(repoPath: string): Promise<boolean> {
+  return invoke<boolean>('git_has_upstream', { repoPath })
+}
+
+/** Get number of commits ahead of upstream. */
+export async function gitAheadCount(repoPath: string): Promise<number> {
+  return invoke<number>('git_ahead_count', { repoPath })
+}
+
 /** Stage all changes and commit with the given message. */
 export async function gitCommit(repoPath: string, message: string): Promise<void> {
   return invoke<void>('git_commit', { repoPath, message })
@@ -155,9 +165,34 @@ export async function gitPush(repoPath: string): Promise<void> {
   return invoke<void>('git_push', { repoPath })
 }
 
+/** Pull from upstream. */
+export async function gitPull(repoPath: string): Promise<void> {
+  return invoke<void>('git_pull', { repoPath })
+}
+
 /** Discard changes for a file (restore modified, remove untracked). */
 export async function gitDiscard(repoPath: string, path: string): Promise<void> {
   return invoke<void>('git_discard', { repoPath, path })
+}
+
+/** Get current branch name (null if detached). */
+export async function gitCurrentBranch(repoPath: string): Promise<string | null> {
+  return invoke<string | null>('git_current_branch', { repoPath })
+}
+
+/** List local branches. */
+export async function gitListBranches(repoPath: string): Promise<string[]> {
+  return invoke<string[]>('git_list_branches', { repoPath })
+}
+
+/** Checkout an existing branch. */
+export async function gitCheckoutBranch(repoPath: string, branch: string): Promise<void> {
+  return invoke<void>('git_checkout_branch', { repoPath, branch })
+}
+
+/** Create a new branch and check it out. */
+export async function gitCreateBranch(repoPath: string, name: string): Promise<void> {
+  return invoke<void>('git_create_branch', { repoPath, name })
 }
 
 export interface GitDiffRange {

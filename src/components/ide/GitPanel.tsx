@@ -9,6 +9,7 @@ import {
   RotateCcw,
   ChevronDown,
   ChevronRight,
+  MoreVertical,
 } from 'lucide-react'
 import { Button } from '../ui/button'
 import { cn } from '@/lib/utils'
@@ -19,6 +20,10 @@ import {
   gitAdd,
   gitReset,
   gitPush,
+  gitPull,
+  gitHasUpstream,
+  gitAheadCount,
+  gitCreateBranch,
   gitDiscard,
   type GitStatusEntry,
 } from '@/desktop'
@@ -80,13 +85,21 @@ export function GitPanel({
   const [commitMessage, setCommitMessage] = useState('')
   const [committing, setCommitting] = useState(false)
   const [pushing, setPushing] = useState(false)
+  const [pulling, setPulling] = useState(false)
+  const [aheadCount, setAheadCount] = useState<number | null>(null)
+  const [hasUpstream, setHasUpstream] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [commitDropdownOpen, setCommitDropdownOpen] = useState(false)
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false)
   const [stagedOpen, setStagedOpen] = useState(true)
   const [changesOpen, setChangesOpen] = useState(true)
   const [discardConfirm, setDiscardConfirm] = useState<string | null>(null)
   const commitDropdownRef = useRef<HTMLDivElement>(null)
+  const sourceMenuRef = useRef<HTMLDivElement>(null)
+  const [newBranchModalOpen, setNewBranchModalOpen] = useState(false)
+  const [newBranchName, setNewBranchName] = useState('')
+  const [creatingBranch, setCreatingBranch] = useState(false)
 
   const fetchStatus = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false
@@ -101,14 +114,37 @@ export function GitPanel({
         isRepo: result.isRepo,
         entries: result.entries ?? [],
       })
+      if (result.isRepo) {
+        try {
+          const [upstream, count] = await Promise.all([
+            gitHasUpstream(repoPath),
+            gitAheadCount(repoPath),
+          ])
+          setHasUpstream(upstream)
+          setAheadCount(count)
+        } catch {
+          setHasUpstream(null)
+          setAheadCount(null)
+        }
+      } else {
+        setHasUpstream(null)
+        setAheadCount(null)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setEntries([])
+      setHasUpstream(null)
+      setAheadCount(null)
     } finally {
       if (!silent) setLoading(false)
     }
   }, [repoPath])
 
+  const fetchStatusRef = useRef(fetchStatus)
+  fetchStatusRef.current = fetchStatus
+
+  // Initial load when panel opens or repo changes. Only depend on isOpen/repoPath
+  // so we don't re-run and flicker when fetchStatus identity changes (e.g. parent re-renders).
   useEffect(() => {
     if (!isOpen || !repoPath) {
       setLoading(false)
@@ -119,21 +155,23 @@ export function GitPanel({
       setIsRepo(cached.isRepo)
       setEntries(cached.entries)
     }
-    // Single round-trip to backend: git_status already checks if this is a repo.
-    // If we have cached data, refresh in the background to keep UI snappy.
-    fetchStatus(cached ? { silent: true } : undefined)
-  }, [isOpen, repoPath, fetchStatus])
+    fetchStatusRef.current(cached ? { silent: true } : undefined)
+  }, [isOpen, repoPath])
 
+  // Refresh when file changes etc. Always silent so we never show "Checking repository…" again.
   useEffect(() => {
     if (refreshTrigger != null && refreshTrigger > 0 && repoPath && isRepo) {
-      fetchStatus()
+      fetchStatusRef.current({ silent: true })
     }
-  }, [refreshTrigger, repoPath, isRepo, fetchStatus])
+  }, [refreshTrigger, repoPath, isRepo])
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (commitDropdownRef.current && !commitDropdownRef.current.contains(e.target as Node)) {
         setCommitDropdownOpen(false)
+      }
+      if (sourceMenuRef.current && !sourceMenuRef.current.contains(e.target as Node)) {
+        setSourceMenuOpen(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -176,7 +214,8 @@ export function GitPanel({
       }
       if (!amend) setCommitMessage('')
       setSuccess(true)
-      await fetchStatus()
+      // Refresh in the background so the UI doesn't flash "Checking repository…"
+      await fetchStatus({ silent: true })
       setTimeout(() => setSuccess(false), 2000)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -189,7 +228,7 @@ export function GitPanel({
     if (!repoPath) return
     try {
       await gitAdd(repoPath, paths)
-      await fetchStatus()
+      await fetchStatus({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -199,7 +238,7 @@ export function GitPanel({
     if (!repoPath) return
     try {
       await gitReset(repoPath, paths)
-      await fetchStatus()
+      await fetchStatus({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -210,7 +249,7 @@ export function GitPanel({
     setDiscardConfirm(null)
     try {
       await gitDiscard(repoPath, path)
-      await fetchStatus()
+      await fetchStatus({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -239,13 +278,61 @@ export function GitPanel({
           <GitBranch className="w-4 h-4 text-gray-400" />
           <span className="text-sm font-semibold text-gray-300">Source Control</span>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1 hover:bg-[#3e3e3e] rounded transition-colors"
-          title="Close"
-        >
-          <X className="w-4 h-4 text-gray-400 hover:text-gray-200" />
-        </button>
+        <div className="flex items-center gap-1">
+          {repoPath && isRepo && (
+            <div className="relative" ref={sourceMenuRef}>
+              <button
+                type="button"
+                onClick={() => setSourceMenuOpen((o) => !o)}
+                className="p-1 hover:bg-[#3e3e3e] rounded transition-colors text-gray-400 hover:text-gray-200"
+                title="Repository actions"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+              {sourceMenuOpen && (
+                <div className="absolute right-0 top-full mt-1 py-1 rounded bg-[#252526] border border-[#3e3e3e] shadow-lg z-20 min-w-[160px]">
+                  <button
+                    className="w-full px-3 py-1.5 text-left text-sm text-gray-200 hover:bg-[#3e3e3e] disabled:opacity-50"
+                    disabled={pulling}
+                    onClick={async () => {
+                      if (!repoPath) return
+                      setSourceMenuOpen(false)
+                      setPulling(true)
+                      setError(null)
+                      try {
+                        await gitPull(repoPath)
+                        await fetchStatus({ silent: true })
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : String(e))
+                      } finally {
+                        setPulling(false)
+                      }
+                    }}
+                  >
+                    {pulling ? 'Pulling…' : 'Pull'}
+                  </button>
+                  <button
+                    className="w-full px-3 py-1.5 text-left text-sm text-gray-200 hover:bg-[#3e3e3e]"
+                    onClick={() => {
+                      setSourceMenuOpen(false)
+                      setNewBranchName('')
+                      setNewBranchModalOpen(true)
+                    }}
+                  >
+                    New branch…
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-[#3e3e3e] rounded transition-colors"
+            title="Close"
+          >
+            <X className="w-4 h-4 text-gray-400 hover:text-gray-200" />
+          </button>
+        </div>
       </div>
 
       {/* Content */}
@@ -331,6 +418,11 @@ export function GitPanel({
                   )}
                 </div>
               </div>
+              {hasUpstream === false && (
+                <p className="text-sm text-amber-400/90 mt-1 mb-1">
+                  This branch has no upstream. Push to create it on the remote.
+                </p>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -341,14 +433,17 @@ export function GitPanel({
                   setError(null)
                   try {
                     await gitPush(repoPath)
-                    await fetchStatus()
+                    await fetchStatus({ silent: true })
                   } catch (e) {
                     setError(e instanceof Error ? e.message : String(e))
                   } finally {
                     setPushing(false)
                   }
                 }}
-                disabled={pushing}
+                disabled={
+                  pushing ||
+                  ((aheadCount == null || aheadCount === 0) && hasUpstream !== false)
+                }
               >
                 {pushing ? 'Pushing…' : 'Push'}
               </Button>
@@ -485,6 +580,89 @@ export function GitPanel({
           </>
         )}
       </div>
+
+      {/* New branch modal */}
+      {newBranchModalOpen && repoPath && (
+        <div
+          className="fixed inset-0 z-40 flex items-start justify-center pt-16 bg-black/60 backdrop-blur-sm"
+          onClick={() => {
+            if (creatingBranch) return
+            setNewBranchModalOpen(false)
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-md bg-[#252526] border border-[#3e3e3e] shadow-lg p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-sm font-semibold text-gray-100 mb-2">Create new branch</h2>
+            <p className="text-xs text-gray-400 mb-3">
+              Enter a name for the new branch. It will be created from the current HEAD and
+              checked out.
+            </p>
+            <input
+              type="text"
+              className="w-full px-3 py-1.5 rounded border border-[#3e3e3e] bg-[#1e1e1e] text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]"
+              placeholder="feature/my-branch"
+              value={newBranchName}
+              onChange={(e) => setNewBranchName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  void (async () => {
+                    if (!repoPath || !newBranchName.trim() || creatingBranch) return
+                    setCreatingBranch(true)
+                    setError(null)
+                    try {
+                      await gitCreateBranch(repoPath, newBranchName.trim())
+                      setNewBranchModalOpen(false)
+                      setNewBranchName('')
+                      await fetchStatus({ silent: true })
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : String(err))
+                    } finally {
+                      setCreatingBranch(false)
+                    }
+                  })()
+                }
+              }}
+              autoFocus
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (creatingBranch) return
+                  setNewBranchModalOpen(false)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={!newBranchName.trim() || creatingBranch}
+                onClick={async () => {
+                  if (!repoPath || !newBranchName.trim() || creatingBranch) return
+                  setCreatingBranch(true)
+                  setError(null)
+                  try {
+                    await gitCreateBranch(repoPath, newBranchName.trim())
+                    setNewBranchModalOpen(false)
+                    setNewBranchName('')
+                    await fetchStatus({ silent: true })
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : String(err))
+                  } finally {
+                    setCreatingBranch(false)
+                  }
+                }}
+              >
+                {creatingBranch ? 'Creating…' : 'Create branch'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

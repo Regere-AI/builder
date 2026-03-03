@@ -272,11 +272,32 @@ pub fn git_push(repo_path: String) -> Result<(), String> {
         return Err("Not a git repository".to_string());
     }
 
-    let output = Command::new("git")
-        .args(["push"])
+    // If current branch has no upstream, use -u so the first push creates it on the remote.
+    let has_upstream = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "@{u}"])
         .current_dir(&repo_path)
         .output()
-        .map_err(|e| e.to_string())?;
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    let output = if has_upstream {
+        Command::new("git")
+            .args(["push"])
+            .current_dir(&repo_path)
+            .output()
+            .map_err(|e| e.to_string())?
+    } else {
+        // No upstream: push and set upstream in one go.
+        let branch = match git_current_branch(repo_path.clone()) {
+            Ok(Some(b)) if !b.is_empty() => b,
+            _ => return Err("Could not determine current branch name.".to_string()),
+        };
+        Command::new("git")
+            .args(["push", "--set-upstream", "origin", &branch])
+            .current_dir(&repo_path)
+            .output()
+            .map_err(|e| e.to_string())?
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -320,6 +341,175 @@ pub fn git_discard(repo_path: String, path: String) -> Result<(), String> {
     if !clean_output.status.success() {
         let stderr = String::from_utf8_lossy(&clean_output.stderr);
         return Err(format!("git discard failed: {}", stderr));
+    }
+
+    Ok(())
+}
+
+/// Returns true if the current branch has an upstream tracking branch configured.
+#[tauri::command]
+pub fn git_has_upstream(repo_path: String) -> Result<bool, String> {
+    if !git_is_repo(repo_path.clone())? {
+        return Ok(false);
+    }
+
+    let output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "@{u}"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(!name.is_empty() && name != "HEAD")
+}
+
+/// Get the number of commits that are ahead of the upstream tracking branch.
+/// Returns 0 if there is no upstream or if the count cannot be determined.
+#[tauri::command]
+pub fn git_ahead_count(repo_path: String) -> Result<u32, String> {
+    if !git_is_repo(repo_path.clone())? {
+        return Ok(0);
+    }
+
+    let output = Command::new("git")
+        .args(["rev-list", "--count", "@{u}..HEAD"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        // No upstream configured or other error; treat as nothing to push.
+        return Ok(0);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let count: u32 = stdout.trim().parse().unwrap_or(0);
+    Ok(count)
+}
+
+/// Pull from the configured upstream.
+#[tauri::command]
+pub fn git_pull(repo_path: String) -> Result<(), String> {
+    if !git_is_repo(repo_path.clone())? {
+        return Err("Not a git repository".to_string());
+    }
+
+    let output = Command::new("git")
+        .args(["pull"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git pull failed: {}", stderr));
+    }
+
+    Ok(())
+}
+
+/// Get the current branch name, or None if detached HEAD or not a repo.
+#[tauri::command]
+pub fn git_current_branch(repo_path: String) -> Result<Option<String>, String> {
+    if !git_is_repo(repo_path.clone())? {
+        return Ok(None);
+    }
+
+    let output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if name.is_empty() || name == "HEAD" {
+        Ok(None)
+    } else {
+        Ok(Some(name))
+    }
+}
+
+/// List local branches.
+#[tauri::command]
+pub fn git_list_branches(repo_path: String) -> Result<Vec<String>, String> {
+    if !git_is_repo(repo_path.clone())? {
+        return Ok(Vec::new());
+    }
+
+    let output = Command::new("git")
+        .args([
+            "for-each-ref",
+            "refs/heads",
+            "--format=%(refname:short)",
+        ])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git list branches failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let branches = stdout
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    Ok(branches)
+}
+
+/// Checkout an existing branch.
+#[tauri::command]
+pub fn git_checkout_branch(repo_path: String, branch: String) -> Result<(), String> {
+    if !git_is_repo(repo_path.clone())? {
+        return Err("Not a git repository".to_string());
+    }
+
+    let output = Command::new("git")
+        .args(["checkout", &branch])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git checkout failed: {}", stderr));
+    }
+
+    Ok(())
+}
+
+/// Create a new branch and check it out.
+#[tauri::command]
+pub fn git_create_branch(repo_path: String, name: String) -> Result<(), String> {
+    if !git_is_repo(repo_path.clone())? {
+        return Err("Not a git repository".to_string());
+    }
+
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Branch name is required".to_string());
+    }
+
+    let output = Command::new("git")
+        .args(["checkout", "-b", trimmed])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git create branch failed: {}", stderr));
     }
 
     Ok(())
