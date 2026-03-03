@@ -519,7 +519,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
             >
               <div
                 className={cn(
-                  'max-w-[80%] rounded-lg px-3 py-2 text-sm',
+                  'max-w-[80%] min-w-0 rounded-lg px-3 py-2 text-sm break-words',
                   message.role === 'user'
                     ? 'bg-[#007acc] text-white'
                     : 'bg-[#2d2d2d] text-gray-300 border border-[#3e3e3e]'

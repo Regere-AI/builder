@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
-import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search, Package, LayoutDashboard, GitBranch } from 'lucide-react'
+import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search, Package, LayoutDashboard, GitBranch, Layers, Plus, Trash2, X, Sparkles } from 'lucide-react'
 import { Tree } from 'react-arborist'
 import type { NodeRendererProps } from 'react-arborist'
 import type { TreeApi } from 'react-arborist'
@@ -15,6 +15,8 @@ import {
   appDelete,
 } from '@/desktop'
 import type { ActiveApp } from './IDELayout'
+import type { LaunchpadConfig } from '@/services/api'
+import { fetchComponentDefinitions, type ComponentDefinition } from '@/lib/registry-components'
 
 function pathJoin(...parts: string[]): string {
   return parts
@@ -27,6 +29,37 @@ function pathDirname(path: string): string {
   const normalized = path.replace(/\\/g, '/')
   const idx = normalized.lastIndexOf('/')
   return idx <= 0 ? normalized : normalized.slice(0, idx)
+}
+
+/** npm package page URL, e.g. @kaushik91/rupa -> https://www.npmjs.com/package/@kaushik91/rupa */
+function npmPackageUrl(pkg: string): string {
+  const name = pkg.trim()
+  return name ? `https://www.npmjs.com/package/${encodeURIComponent(name)}` : '#'
+}
+
+const UI_REGISTRIES_STORAGE_KEY_PREFIX = 'builder_launchpad_ui_registries_'
+
+function getUiRegistriesStorageKey(launchpadId: string): string {
+  return `${UI_REGISTRIES_STORAGE_KEY_PREFIX}${launchpadId}`
+}
+
+function loadUiRegistriesFromStorage(launchpadId: string): string[] {
+  try {
+    const raw = localStorage.getItem(getUiRegistriesStorageKey(launchpadId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+function saveUiRegistriesToStorage(launchpadId: string, packages: string[]): void {
+  try {
+    localStorage.setItem(getUiRegistriesStorageKey(launchpadId), JSON.stringify(packages))
+  } catch {
+    // ignore
+  }
 }
 
 function findNode(nodes: TreeNode[], path: string): TreeNode | null {
@@ -345,6 +378,8 @@ interface LeftSidebarProps {
   onDeletePaths?: (paths: string[]) => void
   /** Increment to refresh the file tree (e.g. after chat creates a file in the app). */
   refreshTrigger?: number
+  /** Current launchpad; UI registries are stored per launchpad in localStorage. */
+  selectedLaunchpad?: LaunchpadConfig | null
 }
 
 interface TreeNode {
@@ -363,6 +398,7 @@ export function LeftSidebar({
   onOpenFile,
   onDeletePaths,
   refreshTrigger,
+  selectedLaunchpad,
 }: LeftSidebarProps) {
   const [tree, setTree] = useState<TreeNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -375,7 +411,85 @@ export function LeftSidebar({
   const [showCreateFileDialog, setShowCreateFileDialog] = useState(false)
   const [createParentPathOverride, setCreateParentPathOverride] = useState<string | null>(null)
   const [createFileKind, setCreateFileKind] = useState<'app' | 'ui' | 'workflow' | null>(null)
+  const [uiRegistriesOpen, setUiRegistriesOpen] = useState(false)
+  const [registryPackages, setRegistryPackages] = useState<string[]>([])
+  const [showAddRegistry, setShowAddRegistry] = useState(false)
+  const [newRegistryPackage, setNewRegistryPackage] = useState('')
+  const [registryComponentsDialogPackage, setRegistryComponentsDialogPackage] = useState<string | null>(null)
+  const [registryComponentsList, setRegistryComponentsList] = useState<ComponentDefinition[]>([])
+  const [registryComponentsLoading, setRegistryComponentsLoading] = useState(false)
+  const [registryComponentsError, setRegistryComponentsError] = useState<string | null>(null)
+  const [registryDetailsExpanded, setRegistryDetailsExpanded] = useState<Set<string>>(new Set())
   const [createAppName, setCreateAppName] = useState('')
+
+  const launchpadId = selectedLaunchpad?.id ?? null
+
+  // Load UI registries from localStorage when launchpad changes
+  useEffect(() => {
+    if (launchpadId) {
+      setRegistryPackages(loadUiRegistriesFromStorage(launchpadId))
+    } else {
+      setRegistryPackages([])
+    }
+  }, [launchpadId])
+
+  const addRegistryPackage = useCallback(
+    (pkg: string) => {
+      const trimmed = pkg.trim()
+      if (!trimmed) return
+      setRegistryPackages((prev) => {
+        if (prev.includes(trimmed)) return prev
+        const next = [...prev, trimmed]
+        if (launchpadId) saveUiRegistriesToStorage(launchpadId, next)
+        return next
+      })
+    },
+    [launchpadId]
+  )
+
+  const removeRegistryPackage = useCallback(
+    (pkg: string) => {
+      setRegistryPackages((prev) => {
+        const next = prev.filter((p) => p !== pkg)
+        if (launchpadId) saveUiRegistriesToStorage(launchpadId, next)
+        return next
+      })
+    },
+    [launchpadId]
+  )
+
+  const openRegistryComponentsDialog = useCallback((pkg: string) => {
+    setRegistryComponentsDialogPackage(pkg)
+    setRegistryComponentsList([])
+    setRegistryComponentsError(null)
+    setRegistryComponentsLoading(true)
+  }, [])
+
+  useEffect(() => {
+    if (!registryComponentsDialogPackage) return
+    let cancelled = false
+    setRegistryComponentsLoading(true)
+    setRegistryComponentsError(null)
+    fetchComponentDefinitions(registryComponentsDialogPackage)
+      .then((list) => {
+        if (!cancelled) {
+          setRegistryComponentsList(list)
+          setRegistryComponentsError(null)
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setRegistryComponentsList([])
+          setRegistryComponentsError(e instanceof Error ? e.message : 'Failed to load components')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRegistryComponentsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [registryComponentsDialogPackage])
   const [createAppUrlPathPrefix, setCreateAppUrlPathPrefix] = useState('')
   const [createFileName, setCreateFileName] = useState('')
   const pendingInputRef = useRef<HTMLInputElement>(null)
@@ -831,6 +945,132 @@ export function LeftSidebar({
                 </Tree>
               </div>
             )}
+
+            {/* UI Registries collapsible pane */}
+            <div className="shrink-0 border-t border-[#3e3e3e] mt-2 pt-2">
+              <div className="flex items-center gap-0.5 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setUiRegistriesOpen(!uiRegistriesOpen)}
+                  className="flex-1 flex items-center gap-2 px-1 py-1.5 rounded text-left text-sm text-gray-300 hover:bg-[#2a2d2e] hover:text-gray-200 transition-colors min-w-0"
+                >
+                  {uiRegistriesOpen ? (
+                    <ChevronDown className="w-4 h-4 shrink-0 text-gray-500" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 shrink-0 text-gray-500" />
+                  )}
+                  <Layers className="w-4 h-4 shrink-0 text-gray-500" />
+                  <span className="truncate font-medium">UI Registries</span>
+                </button>
+                {uiRegistriesOpen && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddRegistry(true)
+                      setNewRegistryPackage('')
+                    }}
+                    className="p-1.5 rounded hover:bg-[#2a2d2e] text-gray-400 hover:text-gray-200 shrink-0"
+                    title="Add UI registry (npm package)"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              {uiRegistriesOpen && (
+                <div className="mt-1 max-h-48 overflow-y-auto -mx-1 px-1 space-y-0.5">
+                  {registryPackages.length === 0 && !showAddRegistry && (
+                    <p className="py-2 text-xs text-gray-500 italic">No registries</p>
+                  )}
+                  {registryPackages.map((pkg) => (
+                    <div
+                      key={pkg}
+                      className="group flex items-center gap-2 py-1.5 px-2 rounded text-xs hover:bg-[#2a2d2e] min-w-0"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => openRegistryComponentsDialog(pkg)}
+                        className="flex-1 min-w-0 flex items-center text-left truncate text-gray-400 hover:text-gray-200"
+                        title={`View components in ${pkg}`}
+                      >
+                        <span className="truncate" title={pkg}>
+                          {pkg}
+                        </span>
+                      </button>
+                      <a
+                        href={npmPackageUrl(pkg)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="shrink-0 text-[#007acc] hover:underline"
+                        title={`View on npm: ${pkg}`}
+                      >
+                        npm
+                      </a>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          removeRegistryPackage(pkg)
+                        }}
+                        className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-[#3e3e3e] text-gray-400 hover:text-red-400"
+                        title="Remove registry"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {showAddRegistry && (
+                    <div className="py-2 space-y-2">
+                      <input
+                        type="text"
+                        value={newRegistryPackage}
+                        onChange={(e) => setNewRegistryPackage(e.target.value)}
+                        placeholder="e.g. @kaushik91/rupa"
+                        className="w-full rounded border border-[#3e3e3e] bg-[#2a2d2e] px-2 py-1.5 text-xs text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]/50"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const p = newRegistryPackage.trim()
+                            if (p) {
+                              addRegistryPackage(p)
+                              setNewRegistryPackage('')
+                              setShowAddRegistry(false)
+                            }
+                          }
+                          if (e.key === 'Escape') setShowAddRegistry(false)
+                        }}
+                        autoFocus
+                      />
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const p = newRegistryPackage.trim()
+                            if (p) {
+                              addRegistryPackage(p)
+                              setNewRegistryPackage('')
+                              setShowAddRegistry(false)
+                            }
+                          }}
+                          className="rounded px-2 py-1 text-xs font-medium bg-[#007acc]/80 text-white hover:bg-[#007acc]"
+                        >
+                          Add
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowAddRegistry(false)
+                            setNewRegistryPackage('')
+                          }}
+                          className="rounded px-2 py-1 text-xs font-medium text-gray-400 hover:bg-[#2a2d2e] hover:text-gray-200"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </>
       )}
@@ -1034,6 +1274,121 @@ export function LeftSidebar({
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Registry components dialog */}
+      {registryComponentsDialogPackage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => {
+            setRegistryComponentsDialogPackage(null)
+            setRegistryDetailsExpanded(new Set())
+          }}
+        >
+          <div
+            className="bg-[#252526] border border-[#3e3e3e] rounded-xl shadow-2xl w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[#3e3e3e] shrink-0 bg-[#2d2d30]/80">
+              <div className="flex flex-col gap-0.5 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Sparkles className="w-4 h-4 shrink-0 text-amber-400/90" />
+                  <h2 className="text-sm font-semibold text-gray-200 truncate">
+                    Components — {registryComponentsDialogPackage}
+                  </h2>
+                  {!registryComponentsLoading && (
+                    <span
+                      className="shrink-0 px-2 py-0.5 rounded-md text-xs font-medium bg-[#007acc]/20 text-[#007acc] border border-[#007acc]/30"
+                      title="Number of components in this registry"
+                    >
+                      {registryComponentsList.length} {registryComponentsList.length === 1 ? 'component' : 'components'}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-gray-500 pl-6">Click “More details” to peek at the schema</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setRegistryComponentsDialogPackage(null)
+                  setRegistryDetailsExpanded(new Set())
+                }}
+                className="p-1.5 rounded hover:bg-[#2a2d2e] text-gray-400 hover:text-gray-200 transition-colors"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4 min-h-0">
+              {registryComponentsLoading && (
+                <p className="text-sm text-gray-500 py-6 flex items-center gap-2">
+                  <span className="inline-block w-4 h-4 border-2 border-[#007acc] border-t-transparent rounded-full animate-spin" />
+                  Loading components…
+                </p>
+              )}
+              {registryComponentsError && !registryComponentsLoading && (
+                <p className="text-sm text-red-400 py-2">{registryComponentsError}</p>
+              )}
+              {!registryComponentsLoading && !registryComponentsError && registryComponentsList.length === 0 && (
+                <p className="text-sm text-gray-500 py-6 italic">No component-definitions.json or component-definitions.js found in package.</p>
+              )}
+              {!registryComponentsLoading && registryComponentsList.length > 0 && (
+                <ul className="space-y-3">
+                  {registryComponentsList.map((c) => {
+                    const isExpanded = registryDetailsExpanded.has(c.name)
+                    const hasSchema = c.schemaSnippet != null && c.schemaSnippet.length > 0
+                    return (
+                      <li
+                        key={c.name}
+                        className="rounded-lg border border-[#3e3e3e] bg-[#2a2d2e] overflow-hidden transition-shadow hover:shadow-md hover:border-[#3e3e3e]/80"
+                      >
+                        <div className="px-4 py-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <span className="text-sm font-semibold text-gray-100">{c.name}</span>
+                              {c.description != null && c.description !== '' && (
+                                <p className="text-xs text-gray-400 mt-1 leading-relaxed">{c.description}</p>
+                              )}
+                            </div>
+                            {hasSchema && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRegistryDetailsExpanded((prev) => {
+                                    const next = new Set(prev)
+                                    if (next.has(c.name)) next.delete(c.name)
+                                    else next.add(c.name)
+                                    return next
+                                  })
+                                }}
+                                className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[#1e1e1e] border border-[#3e3e3e] text-gray-300 hover:bg-[#333] hover:border-[#007acc]/40 hover:text-[#007acc] transition-colors"
+                              >
+                                {isExpanded ? 'Hide schema' : 'More details'}
+                                <ChevronDown
+                                  className={cn('w-3.5 h-3.5 transition-transform', isExpanded && 'rotate-180')}
+                                />
+                              </button>
+                            )}
+                          </div>
+                          {hasSchema && isExpanded && (
+                            <div className="mt-3 rounded-md border border-[#1e1e1e] bg-[#1a1a1a] overflow-hidden">
+                              <div className="px-2 py-1.5 border-b border-[#2a2d2e] text-[10px] uppercase tracking-wider text-gray-500 font-medium">
+                                Schema / props
+                              </div>
+                              <pre className="p-3 text-xs text-gray-300 overflow-x-auto overflow-y-auto max-h-64 font-mono leading-relaxed whitespace-pre select-text">
+                                <code className="text-[11px]">{c.schemaSnippet}</code>
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
           </div>
         </div>
       )}
