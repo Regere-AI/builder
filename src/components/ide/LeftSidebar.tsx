@@ -378,7 +378,7 @@ interface LeftSidebarProps {
   onDeletePaths?: (paths: string[]) => void
   /** Increment to refresh the file tree (e.g. after chat creates a file in the app). */
   refreshTrigger?: number
-  /** Current launchpad; UI registries are stored per launchpad in localStorage. */
+  /** Current launchpad; UI registry docs are stored per launchpad in localStorage. */
   selectedLaunchpad?: LaunchpadConfig | null
 }
 
@@ -420,11 +420,12 @@ export function LeftSidebar({
   const [registryComponentsLoading, setRegistryComponentsLoading] = useState(false)
   const [registryComponentsError, setRegistryComponentsError] = useState<string | null>(null)
   const [registryDetailsExpanded, setRegistryDetailsExpanded] = useState<Set<string>>(new Set())
+  const [registryComponentsSearch, setRegistryComponentsSearch] = useState('')
   const [createAppName, setCreateAppName] = useState('')
 
   const launchpadId = selectedLaunchpad?.id ?? null
 
-  // Load UI registries from localStorage when launchpad changes
+  // Load UI registry docs from localStorage when launchpad changes
   useEffect(() => {
     if (launchpadId) {
       setRegistryPackages(loadUiRegistriesFromStorage(launchpadId))
@@ -490,6 +491,17 @@ export function LeftSidebar({
       cancelled = true
     }
   }, [registryComponentsDialogPackage])
+
+  const registryComponentsFiltered = useMemo(() => {
+    const q = registryComponentsSearch.trim().toLowerCase()
+    if (!q) return registryComponentsList
+    return registryComponentsList.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        (c.description != null && c.description.toLowerCase().includes(q))
+    )
+  }, [registryComponentsList, registryComponentsSearch])
+
   const [createAppUrlPathPrefix, setCreateAppUrlPathPrefix] = useState('')
   const [createFileName, setCreateFileName] = useState('')
   const pendingInputRef = useRef<HTMLInputElement>(null)
@@ -960,7 +972,7 @@ export function LeftSidebar({
                     <ChevronRight className="w-4 h-4 shrink-0 text-gray-500" />
                   )}
                   <Layers className="w-4 h-4 shrink-0 text-gray-500" />
-                  <span className="truncate font-medium">UI Registries</span>
+                  <span className="truncate font-medium">UI registry docs</span>
                 </button>
                 {uiRegistriesOpen && (
                   <button
@@ -970,7 +982,7 @@ export function LeftSidebar({
                       setNewRegistryPackage('')
                     }}
                     className="p-1.5 rounded hover:bg-[#2a2d2e] text-gray-400 hover:text-gray-200 shrink-0"
-                    title="Add UI registry (npm package)"
+                    title="Add UI registry doc (npm package)"
                   >
                     <Plus className="w-4 h-4" />
                   </button>
@@ -979,7 +991,7 @@ export function LeftSidebar({
               {uiRegistriesOpen && (
                 <div className="mt-1 max-h-48 overflow-y-auto -mx-1 px-1 space-y-0.5">
                   {registryPackages.length === 0 && !showAddRegistry && (
-                    <p className="py-2 text-xs text-gray-500 italic">No registries</p>
+                    <p className="py-2 text-xs text-gray-500 italic">No registry docs</p>
                   )}
                   {registryPackages.map((pkg) => (
                     <div
@@ -1013,7 +1025,7 @@ export function LeftSidebar({
                           removeRegistryPackage(pkg)
                         }}
                         className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-[#3e3e3e] text-gray-400 hover:text-red-400"
-                        title="Remove registry"
+                        title="Remove registry doc"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1285,6 +1297,7 @@ export function LeftSidebar({
           onClick={() => {
             setRegistryComponentsDialogPackage(null)
             setRegistryDetailsExpanded(new Set())
+            setRegistryComponentsSearch('')
           }}
         >
           <div
@@ -1301,7 +1314,7 @@ export function LeftSidebar({
                   {!registryComponentsLoading && (
                     <span
                       className="shrink-0 px-2 py-0.5 rounded-md text-xs font-medium bg-[#007acc]/20 text-[#007acc] border border-[#007acc]/30"
-                      title="Number of components in this registry"
+                      title="Number of components in this registry doc"
                     >
                       {registryComponentsList.length} {registryComponentsList.length === 1 ? 'component' : 'components'}
                     </span>
@@ -1314,6 +1327,7 @@ export function LeftSidebar({
                 onClick={() => {
                   setRegistryComponentsDialogPackage(null)
                   setRegistryDetailsExpanded(new Set())
+                  setRegistryComponentsSearch('')
                 }}
                 className="p-1.5 rounded hover:bg-[#2a2d2e] text-gray-400 hover:text-gray-200 transition-colors"
                 title="Close"
@@ -1321,7 +1335,19 @@ export function LeftSidebar({
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="overflow-y-auto p-4 min-h-0">
+            <div className="overflow-y-auto p-4 min-h-0 flex flex-col gap-3">
+              {!registryComponentsLoading && registryComponentsList.length > 0 && (
+                <div className="shrink-0 flex items-center gap-2">
+                  <Search className="w-4 h-4 text-gray-500 shrink-0" />
+                  <input
+                    type="text"
+                    value={registryComponentsSearch}
+                    onChange={(e) => setRegistryComponentsSearch(e.target.value)}
+                    placeholder="Search components by name or description…"
+                    className="flex-1 min-w-0 rounded border border-[#3e3e3e] bg-[#2a2d2e] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]/50"
+                  />
+                </div>
+              )}
               {registryComponentsLoading && (
                 <p className="text-sm text-gray-500 py-6 flex items-center gap-2">
                   <span className="inline-block w-4 h-4 border-2 border-[#007acc] border-t-transparent rounded-full animate-spin" />
@@ -1334,9 +1360,12 @@ export function LeftSidebar({
               {!registryComponentsLoading && !registryComponentsError && registryComponentsList.length === 0 && (
                 <p className="text-sm text-gray-500 py-6 italic">No component-definitions.json or component-definitions.js found in package.</p>
               )}
-              {!registryComponentsLoading && registryComponentsList.length > 0 && (
+              {!registryComponentsLoading && registryComponentsList.length > 0 && registryComponentsFiltered.length === 0 && (
+                <p className="text-sm text-gray-500 py-6 italic">No components match your search.</p>
+              )}
+              {!registryComponentsLoading && registryComponentsList.length > 0 && registryComponentsFiltered.length > 0 && (
                 <ul className="space-y-3">
-                  {registryComponentsList.map((c) => {
+                  {registryComponentsFiltered.map((c) => {
                     const isExpanded = registryDetailsExpanded.has(c.name)
                     const hasSchema = c.schemaSnippet != null && c.schemaSnippet.length > 0
                     return (
