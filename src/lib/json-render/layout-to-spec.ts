@@ -122,6 +122,22 @@ export function isJsonRenderSpec(value: unknown): value is JsonRenderSpec {
 }
 
 /**
+ * Ensures a spec has a valid root so the preview can render.
+ * If the spec has elements but root is missing or not in elements, sets root to the first element id.
+ */
+export function ensureSpecHasRoot(spec: Record<string, unknown>): JsonRenderSpec | null {
+  const elements = spec.elements
+  if (elements == null || typeof elements !== 'object' || Array.isArray(elements)) return null
+  const keys = Object.keys(elements)
+  if (keys.length === 0) return null
+  let root = spec.root
+  if (typeof root !== 'string' || !(root in elements)) {
+    root = keys[0]
+  }
+  return { root, elements: elements as JsonRenderSpec['elements'] }
+}
+
+/**
  * Parse JSON content and return a json-render Spec if possible.
  * - If the JSON is already a spec (root + elements), return it.
  * - If the JSON is a legacy layout node (type + props + children), convert and return.

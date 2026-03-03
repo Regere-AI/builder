@@ -9,9 +9,19 @@ import type { EditorSelectionPayload } from './EditorView'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { getChatApiUrl } from '@/lib/chat-api'
-import { buildSpecFromParts, getTextFromParts } from '@json-render/react'
+import {
+  buildSpecFromParts,
+  getTextFromParts,
+  useJsonRenderMessage,
+  Renderer,
+  StateProvider,
+  VisibilityProvider,
+  ActionProvider,
+} from '@json-render/react'
+import type { Spec } from '@json-render/core'
 import { createSpecStreamCompiler, compileSpecStream } from '@json-render/core'
-import { parseToSpec, isJsonRenderSpec } from '@/lib/json-render/layout-to-spec'
+import { parseToSpec, isJsonRenderSpec, ensureSpecHasRoot } from '@/lib/json-render/layout-to-spec'
+import { registry } from '@/lib/json-render/registry'
 
 const MODEL_OPTIONS: { value: BuilderModelId; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
@@ -84,6 +94,40 @@ const DEFAULT_WIDTH = 320
 
 const CHAT_API_URL = getChatApiUrl()
 
+/** Renders a single assistant message: text from parts + optional json-render spec (from parts or live stream). */
+function AssistantMessageBubble({
+  parts,
+  liveSpec,
+  isStreaming,
+}: {
+  parts: Array<{ type: string; text?: string; data?: unknown }>
+  liveSpec: Spec | null
+  isStreaming: boolean
+}) {
+  const { spec, text } = useJsonRenderMessage(parts)
+  const displaySpec = (isStreaming && liveSpec) || spec
+  const hasText = text.trim().length > 0
+  return (
+    <div className="flex flex-col gap-2 w-full max-w-[85%]">
+      {hasText && (
+        <p className="text-sm text-gray-300 whitespace-pre-wrap break-words">{text}</p>
+      )}
+      {isStreaming && !hasText && <p className="text-sm text-gray-500">…</p>}
+      {displaySpec && (
+        <div className="rounded-md border border-[#3e3e3e] bg-[#1e1e1e] p-3 overflow-auto max-h-[280px]">
+          <StateProvider initialState={{}}>
+            <VisibilityProvider>
+              <ActionProvider handlers={{}}>
+                <Renderer spec={displaySpec} registry={registry} loading={isStreaming} />
+              </ActionProvider>
+            </VisibilityProvider>
+          </StateProvider>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentResponse, appRootPath, pendingContext, onConsumePendingContext }: ChatPanelProps) {
   const [inputValue, setInputValue] = useState('')
   const [agentMode, setAgentMode] = useState<'Agent' | 'Plan'>('Agent')
@@ -103,6 +147,11 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
     compiler: ReturnType<typeof createSpecStreamCompiler<Record<string, unknown>>>
     lastPushedLength: number
   } | null>(null)
+
+  /** Live spec while the last assistant message is streaming (progressive SpecStream rendering). */
+  const [liveStreamingSpec, setLiveStreamingSpec] = useState<Spec | null>(null)
+  /** Shown when streaming finishes and generated JSON was written to file. */
+  const [uiGeneratedMessage, setUiGeneratedMessage] = useState<string | null>(null)
 
   const chatBodyRef = useRef<Record<string, unknown>>(function initBody() {
     const s = getBuilderSettings()
@@ -153,6 +202,49 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
       timestamp: new Date(),
     }))
   }, [aiMessages])
+
+  // Progressive SpecStream: update live spec as the assistant message streams
+  useEffect(() => {
+    if (aiStatus !== 'streaming') {
+      setLiveStreamingSpec(null)
+      return
+    }
+    const last = aiMessages[aiMessages.length - 1]
+    if (!last || last.role !== 'assistant') {
+      setLiveStreamingSpec(null)
+      return
+    }
+    const text = getTextFromParts(last.parts ?? [])
+    if (!text.trim()) {
+      setLiveStreamingSpec(null)
+      return
+    }
+    if (!specStreamRef.current || specStreamRef.current.messageId !== last.id) {
+      specStreamRef.current = {
+        messageId: last.id,
+        compiler: createSpecStreamCompiler<Record<string, unknown>>(),
+        lastPushedLength: 0,
+      }
+    }
+    const state = specStreamRef.current
+    const toPush = text.slice(state.lastPushedLength)
+    if (toPush) {
+      try {
+        const { result } = state.compiler.push(toPush)
+        state.lastPushedLength = text.length
+        if (result && isJsonRenderSpec(result)) {
+          setLiveStreamingSpec(result as Spec)
+        }
+      } catch {
+        try {
+          const spec = compileSpecStream<Record<string, unknown>>(text)
+          if (isJsonRenderSpec(spec)) setLiveStreamingSpec(spec as Spec)
+        } catch {
+          setLiveStreamingSpec(null)
+        }
+      }
+    }
+  }, [aiMessages, aiStatus])
 
   // Update panel width when prop changes
   useEffect(() => {
@@ -344,7 +436,17 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
 
     if (!code) return
 
+    // Ensure written spec has a valid root so the preview never shows "Invalid layout JSON"
+    try {
+      const parsed = JSON.parse(code) as Record<string, unknown>
+      const normalized = ensureSpecHasRoot(parsed)
+      if (normalized) code = JSON.stringify(normalized, null, 2)
+    } catch {
+      // keep code as-is
+    }
+
     const notifyAndOpen = (resolvedPath?: string) => {
+      setUiGeneratedMessage('UI successfully generated')
       onAgentResponse?.({
         type: 'code',
         content: { code, filePath: GENERATED_RELATIVE_PATH, ...(resolvedPath && { resolvedPath }) },
@@ -399,6 +501,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
 
     setInputValue('')
     setAttachedContexts([])
+    setUiGeneratedMessage(null)
 
     if (CHAT_API_URL && transport) {
       try {
@@ -509,38 +612,50 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
             </p>
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={cn(
-                'flex flex-col gap-1',
-                message.role === 'user' ? 'items-end' : 'items-start'
-              )}
-            >
+          messages.map((message) => {
+            const aiMsg = aiMessages.find((m) => m.id === message.id)
+            const isLastAssistant = message.role === 'assistant' && aiMessages[aiMessages.length - 1]?.id === message.id
+            return (
               <div
+                key={message.id}
                 className={cn(
-                  'max-w-[80%] rounded-lg px-3 py-2 text-sm',
-                  message.role === 'user'
-                    ? 'bg-[#007acc] text-white'
-                    : 'bg-[#2d2d2d] text-gray-300 border border-[#3e3e3e]'
+                  'flex flex-col gap-1',
+                  message.role === 'user' ? 'items-end' : 'items-start'
                 )}
               >
-                {message.content || (message.role === 'assistant' && isLoading ? '…' : '')}
+                {message.role === 'user' ? (
+                  <div className="max-w-[80%] rounded-lg px-3 py-2 text-sm bg-[#007acc] text-white">
+                    {message.content}
+                  </div>
+                ) : (
+                  <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-[#2d2d2d] text-gray-300 border border-[#3e3e3e]">
+                    <AssistantMessageBubble
+                      parts={aiMsg?.parts ?? []}
+                      liveSpec={isLastAssistant ? liveStreamingSpec : null}
+                      isStreaming={isLastAssistant && isLoading}
+                    />
+                  </div>
+                )}
+                <span className="text-xs text-gray-600">
+                  {message.timestamp.toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
               </div>
-              <span className="text-xs text-gray-600">
-                {message.timestamp.toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </span>
-            </div>
-          ))
+            )
+          })
         )}
         <div ref={messagesEndRef} />
       </div>
 
       {/* Input Area */}
       <div className="border-t border-[#3e3e3e] p-4 bg-[#2d2d2d]">
+        {uiGeneratedMessage && !isLoading && (
+          <div className="mb-2 rounded-md bg-emerald-500/10 border border-emerald-500/30 px-3 py-2 text-sm text-emerald-400">
+            {uiGeneratedMessage}
+          </div>
+        )}
         {aiError && (
           <div className="mb-2 rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-sm text-red-400">
             {aiError.message.includes('fetch') || aiError.message === 'Load failed' || aiError.message.includes('Failed to fetch')

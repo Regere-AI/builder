@@ -6,7 +6,7 @@ import { JsonSplitView } from './JsonSplitView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
 import { BuilderSettingsView } from './BuilderSettingsView'
 import type { Spec } from '@json-render/core'
-import { Renderer, StateProvider, VisibilityProvider, ActionProvider } from '@json-render/react'
+import { Renderer, JSONUIProvider } from '@json-render/react'
 import { registry } from '@/lib/json-render/registry'
 import { parseToSpec, isJsonRenderSpec } from '@/lib/json-render/layout-to-spec'
 
@@ -719,13 +719,9 @@ export function BuilderDashboard({
           showLayoutPreview ? (
             <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e]">
               <div className="min-h-full rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
-                <StateProvider initialState={{}}>
-                  <VisibilityProvider>
-                    <ActionProvider handlers={{}}>
-                      <Renderer spec={layoutSpec as Spec} registry={registry} />
-                    </ActionProvider>
-                  </VisibilityProvider>
-                </StateProvider>
+                <JSONUIProvider registry={registry} initialState={{}} handlers={{}}>
+                  <Renderer spec={layoutSpec as Spec} registry={registry} />
+                </JSONUIProvider>
               </div>
             </div>
           ) : layoutSpec === null && showPreview && isJsonFile ? (
