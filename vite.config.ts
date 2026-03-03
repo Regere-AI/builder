@@ -16,6 +16,12 @@ export default defineConfig({
     fs: {
       allow: ['..'],
     },
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3030',
+        changeOrigin: true,
+      },
+    },
   },
   resolve: {
     alias: {

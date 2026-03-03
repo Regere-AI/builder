@@ -1,10 +1,23 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { X, MessageSquare, Send, GripVertical, FileCode } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Select } from '../ui/select'
 import { cn } from '@/lib/utils'
-import { generate, getGenerateResponseText, isTauri } from '@/desktop'
+import { chat, getAgentResponseText, isTauri, appWriteTextFile, appCreateDir, saveFile } from '@/desktop'
+import { getBuilderSettings, setBuilderSettings, type BuilderModelId } from '@/services/api'
 import type { EditorSelectionPayload } from './EditorView'
+import { useChat } from '@ai-sdk/react'
+import { DefaultChatTransport } from 'ai'
+import { getChatApiUrl } from '@/lib/chat-api'
+import { buildSpecFromParts, getTextFromParts } from '@json-render/react'
+import { createSpecStreamCompiler, compileSpecStream } from '@json-render/core'
+import { parseToSpec, isJsonRenderSpec } from '@/lib/json-render/layout-to-spec'
+
+const MODEL_OPTIONS: { value: BuilderModelId; label: string }[] = [
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'google', label: 'Google' },
+]
 
 interface Message {
   id: string
@@ -15,7 +28,40 @@ interface Message {
 
 export interface AgentResponsePayload {
   type: 'code'
-  content: { code: string; filePath?: string }
+  content: { code: string; filePath?: string; /** Full path where file was written (Tauri); dashboard uses this when activeApp is null. */ resolvedPath?: string }
+}
+
+const GENERATED_RELATIVE_PATH = 'uiConfigs/generated.json'
+
+function pathJoin(...parts: string[]): string {
+  return parts.filter(Boolean).join('/').replace(/\\/g, '/')
+}
+
+/** Extract JSON string for UI file from assistant text (raw JSON or markdown code block). */
+function extractJsonForUi(text: string): string | null {
+  const trimmed = text.trim()
+  if (!trimmed) return null
+  // Try raw parse first
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (parsed && typeof parsed === 'object') {
+      const o = parsed as Record<string, unknown>
+      if (typeof o.root === 'string' && o.elements != null && typeof o.elements === 'object') return JSON.stringify(parsed, null, 2)
+      if (typeof (o as { type?: string }).type === 'string') return JSON.stringify(parsed, null, 2)
+    }
+  } catch {
+    // ignore
+  }
+  const codeBlock = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (codeBlock?.[1]) {
+    try {
+      const parsed = JSON.parse(codeBlock[1].trim()) as unknown
+      if (parsed && typeof parsed === 'object') return JSON.stringify(parsed, null, 2)
+    } catch {
+      // ignore
+    }
+  }
+  return null
 }
 
 interface ChatPanelProps {
@@ -24,6 +70,8 @@ interface ChatPanelProps {
   width?: number
   onWidthChange?: (width: number) => void
   onAgentResponse?: (data: AgentResponsePayload) => void
+  /** App root path (e.g. activeApp.rootPath). When set, streamed spec is written to uiConfigs/generated.json. */
+  appRootPath?: string | null
   /** When set, add this selection to attached contexts (e.g. from Ctrl+L); shown as a chip with remove button. */
   pendingContext?: EditorSelectionPayload | null
   /** Called after pendingContext has been added to attached list. */
@@ -34,18 +82,77 @@ const MIN_WIDTH = 300
 const MAX_WIDTH = 800
 const DEFAULT_WIDTH = 320
 
-export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentResponse, pendingContext, onConsumePendingContext }: ChatPanelProps) {
-  const [messages, setMessages] = useState<Message[]>([])
+const CHAT_API_URL = getChatApiUrl()
+
+export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentResponse, appRootPath, pendingContext, onConsumePendingContext }: ChatPanelProps) {
   const [inputValue, setInputValue] = useState('')
   const [agentMode, setAgentMode] = useState<'Agent' | 'Plan'>('Agent')
+  const [selectedModel, setSelectedModel] = useState<BuilderModelId>(() => {
+    const stored = getBuilderSettings().selectedModel
+    return (stored ?? 'openai') as BuilderModelId
+  })
   const [panelWidth, setPanelWidth] = useState(width || DEFAULT_WIDTH)
   const [isResizing, setIsResizing] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
   const [attachedContexts, setAttachedContexts] = useState<EditorSelectionPayload[]>([])
   const lastAddedContextKeyRef = useRef<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const resizeRef = useRef<HTMLDivElement>(null)
+  const specStreamRef = useRef<{
+    messageId: string
+    compiler: ReturnType<typeof createSpecStreamCompiler<Record<string, unknown>>>
+    lastPushedLength: number
+  } | null>(null)
+
+  const chatBodyRef = useRef<Record<string, unknown>>(function initBody() {
+    const s = getBuilderSettings()
+    return {
+      model: (s.selectedModel ?? 'openai') as BuilderModelId,
+      openaiApiKey: s.openaiApiKey,
+      claudeApiKey: s.claudeApiKey,
+      googleApiKey: s.googleApiKey,
+    }
+  }())
+  useEffect(() => {
+    const s = getBuilderSettings()
+    if (!s.selectedModel) setBuilderSettings({ selectedModel: 'openai' })
+  }, [])
+  useEffect(() => {
+    chatBodyRef.current = {
+      model: selectedModel,
+      openaiApiKey: getBuilderSettings().openaiApiKey,
+      claudeApiKey: getBuilderSettings().claudeApiKey,
+      googleApiKey: getBuilderSettings().googleApiKey,
+    }
+  }, [selectedModel])
+
+  const transport = useMemo(
+    () =>
+      CHAT_API_URL
+        ? new DefaultChatTransport({
+            api: CHAT_API_URL,
+            body: () => chatBodyRef.current,
+          })
+        : undefined,
+    []
+  )
+
+  const {
+    messages: aiMessages,
+    sendMessage,
+    status: aiStatus,
+    error: aiError,
+  } = useChat(transport ? { transport } : { transport: undefined! })
+
+  const isLoading = aiStatus === 'streaming' || aiStatus === 'submitted'
+  const messages: Message[] = useMemo(() => {
+    return aiMessages.map((m) => ({
+      id: m.id,
+      content: getTextFromParts(m.parts ?? []),
+      role: m.role as 'user' | 'assistant',
+      timestamp: new Date(),
+    }))
+  }, [aiMessages])
 
   // Update panel width when prop changes
   useEffect(() => {
@@ -165,6 +272,121 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
     }
   }, [isResizing, onWidthChange])
 
+  // When streaming finishes, write last assistant message to uiConfigs/generated.json (local file so user can edit).
+  useEffect(() => {
+    const last = aiMessages[aiMessages.length - 1]
+    if (!last || last.role !== 'assistant') return
+    // Only write when stream is done so we have complete JSON
+    if (aiStatus === 'streaming' || aiStatus === 'submitted') return
+
+    const text = getTextFromParts(last.parts ?? [])
+    if (!text.trim() && !last.parts?.length) return
+
+    let code: string | null = null
+
+    // 1) Build spec with @json-render/core: SpecStream (JSONL patches) or one-shot compile
+    if (text.trim()) {
+      const prev = specStreamRef.current
+      if (!prev || prev.messageId !== last.id) {
+        specStreamRef.current = {
+          messageId: last.id,
+          compiler: createSpecStreamCompiler<Record<string, unknown>>(),
+          lastPushedLength: 0,
+        }
+      }
+      const state = specStreamRef.current
+      if (state) {
+        const toPush = text.slice(state.lastPushedLength)
+        if (toPush) {
+          try {
+            const { result } = state.compiler.push(toPush)
+            state.lastPushedLength = text.length
+            if (result && isJsonRenderSpec(result)) {
+              code = JSON.stringify(result, null, 2)
+            }
+          } catch {
+            // one-shot compile of full text (e.g. complete JSONL)
+            try {
+              const spec = compileSpecStream<Record<string, unknown>>(text)
+              if (isJsonRenderSpec(spec)) code = JSON.stringify(spec, null, 2)
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+    }
+
+    // 2) Fallback: buildSpecFromParts (data parts) or parseToSpec; only use if result is a valid spec
+    if (!code) {
+      const specFromParts = last.parts?.length ? buildSpecFromParts(last.parts) : null
+      const parsedSpec = specFromParts ? null : parseToSpec(text)
+      const fallbackJson = specFromParts ? JSON.stringify(specFromParts, null, 2) : (parsedSpec ? JSON.stringify(parsedSpec, null, 2) : extractJsonForUi(text))
+      if (fallbackJson) {
+        try {
+          const parsed = JSON.parse(fallbackJson) as unknown
+          if (isJsonRenderSpec(parsed)) code = fallbackJson
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    // 3) Lenient: if stream looks like JSONL, compile and use so we always write when there's JSON
+    if (!code && text.trim()) {
+      try {
+        const spec = compileSpecStream<Record<string, unknown>>(text)
+        if (spec && typeof spec === 'object') code = JSON.stringify(spec, null, 2)
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!code) return
+
+    const notifyAndOpen = (resolvedPath?: string) => {
+      onAgentResponse?.({
+        type: 'code',
+        content: { code, filePath: GENERATED_RELATIVE_PATH, ...(resolvedPath && { resolvedPath }) },
+      })
+    }
+
+    if (isTauri()) {
+      const doWrite = async () => {
+        if (appRootPath) {
+          const fullPath = pathJoin(appRootPath, GENERATED_RELATIVE_PATH)
+          const dirPath = pathJoin(appRootPath, 'uiConfigs')
+          await appCreateDir(dirPath, true)
+          await appWriteTextFile(fullPath, code!)
+          notifyAndOpen(fullPath)
+        } else {
+          // No app folder open: use Save dialog so user picks their local directory (e.g. project folder)
+          const result = await saveFile(code!, 'generated.json')
+          if (result?.success && result.filePath) {
+            notifyAndOpen(result.filePath)
+          } else {
+            // User canceled or error: still open in editor so they can copy/save later
+            notifyAndOpen()
+          }
+        }
+      }
+      void doWrite().catch((e) => {
+        console.error('Failed to write generated.json:', e)
+        notifyAndOpen()
+      })
+    } else {
+      // Web: trigger download so user gets the file locally
+      const blob = new Blob([code], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'generated.json'
+      a.click()
+      URL.revokeObjectURL(url)
+      notifyAndOpen()
+    }
+  }, [aiMessages, aiStatus, onAgentResponse, appRootPath])
+
   const handleSend = async () => {
     const hasInput = inputValue.trim().length > 0
     const hasContext = attachedContexts.length > 0
@@ -175,67 +397,67 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
       ? contextBlocks.join('\n\n') + (hasInput ? '\n\n' + inputValue.trim() : '')
       : inputValue.trim()
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: prompt,
-      role: 'user',
-      timestamp: new Date(),
-    }
-
-    setMessages((prev) => [...prev, userMessage])
     setInputValue('')
     setAttachedContexts([])
 
-    const assistantId = (Date.now() + 1).toString()
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantId, content: '', role: 'assistant', timestamp: new Date() },
-    ])
-    setIsLoading(true)
+    if (CHAT_API_URL && transport) {
+      try {
+        await sendMessage({ text: prompt })
+      } catch (err) {
+        console.error('Chat send failed:', err)
+      }
+      return
+    }
 
     if (isTauri()) {
       try {
-        const response = await generate(prompt, {
-          stream: false,
-          mode: 'generator',
-          includeSteps: false,
+        const isPlanMode = agentMode === 'Plan'
+        const response = await chat({
+          messages: [{ role: 'user', parts: [{ type: 'text', text: prompt }] }],
+          agentMode: !isPlanMode,
+          planOnly: isPlanMode,
+          currentUI: null,
         })
-        const text = getGenerateResponseText(response)
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: text || '(No content)' } : m
-          )
-        )
-        if (text) {
-          const trimmed = text.trim()
-          const isJson = trimmed.startsWith('{') || trimmed.startsWith('[')
-          onAgentResponse?.({
-            type: 'code',
-            content: { code: text, filePath: isJson ? 'uiConfigs/generated.json' : 'uiConfigs/generated.tsx' },
-          })
+        const text = getAgentResponseText(response)
+        const codeForPreview =
+          text?.trim() ||
+          (response && typeof response === 'object' && (response as Record<string, unknown>).ui != null
+            ? JSON.stringify((response as Record<string, unknown>).ui, null, 2)
+            : '')
+        if (codeForPreview) {
+          const isJson = codeForPreview.trimStart().startsWith('{') || codeForPreview.trimStart().startsWith('[')
+          const filePath = isJson ? GENERATED_RELATIVE_PATH : 'uiConfigs/generated.tsx'
+          if (isJson) {
+            const doWrite = async () => {
+              let resolvedPath: string | undefined
+              if (appRootPath) {
+                const fullPath = pathJoin(appRootPath, GENERATED_RELATIVE_PATH)
+                const dirPath = pathJoin(appRootPath, 'uiConfigs')
+                await appCreateDir(dirPath, true)
+                await appWriteTextFile(fullPath, codeForPreview)
+                resolvedPath = fullPath
+              } else {
+                const result = await saveFile(codeForPreview, 'generated.json')
+                if (result?.success && result.filePath) resolvedPath = result.filePath
+              }
+              onAgentResponse?.({
+                type: 'code',
+                content: { code: codeForPreview, filePath, ...(resolvedPath && { resolvedPath }) },
+              })
+            }
+            void doWrite().catch((e) => {
+              console.error('Failed to write generated.json:', e)
+              onAgentResponse?.({ type: 'code', content: { code: codeForPreview, filePath } })
+            })
+          } else {
+            onAgentResponse?.({ type: 'code', content: { code: codeForPreview, filePath } })
+          }
         }
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err)
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: `Error: ${errorMessage}` } : m
-          )
-        )
-      } finally {
-        setIsLoading(false)
+        console.error('Tauri chat failed:', err)
       }
-    } else {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? { ...m, content: 'Chat requires the desktop app (Tauri). Run: npm run tauri dev' }
-            : m
-        )
-      )
-      setIsLoading(false)
     }
   }
-
 
   if (!isOpen) return null
 
@@ -319,6 +541,15 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
 
       {/* Input Area */}
       <div className="border-t border-[#3e3e3e] p-4 bg-[#2d2d2d]">
+        {aiError && (
+          <div className="mb-2 rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-sm text-red-400">
+            {aiError.message.includes('fetch') || aiError.message === 'Load failed' || aiError.message.includes('Failed to fetch')
+              ? 'Chat server not running. Start it with: npm run chat:server (or npm run dev:with-chat to run app and chat server together).'
+              : aiError.message.includes('500') || aiError.message.toLowerCase().includes('internal server error')
+                ? `Server error: ${aiError.message}. Check the terminal where you run "npm run chat:server" for details. Ensure your API key is set in Builder Settings (gear icon).`
+                : aiError.message}
+          </div>
+        )}
         <div className="flex flex-col gap-2">
           {/* Input Field Container */}
           <div className="bg-[#1e1e1e] border border-[#3e3e3e] rounded-md focus-within:ring-2 focus-within:ring-[#007acc] focus-within:ring-offset-2 focus-within:ring-offset-[#2d2d2d] focus-within:border-[#007acc]">
@@ -371,18 +602,31 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
               rows={3}
               className="w-full bg-transparent border-0 outline-none px-3 py-3 text-sm text-gray-300 placeholder:text-gray-600 focus:outline-none resize-none custom-scrollbar"
             />
-          {/* Bottom Row: Agent Selector and Send Button */}
-          <div className="flex items-center justify-between p-2">
-            {/* Agent Selector */}
-            <Select
-              value={agentMode}
-              options={[
-                { value: 'Agent', label: 'Agent' },
-                { value: 'Plan', label: 'Plan' }
-              ]}
-              onChange={(value) => setAgentMode(value as 'Agent' | 'Plan')}
-              className="w-16 bg-[#2d2d2d] border border-[#3e3e3e] rounded-md "
-            />
+          {/* Bottom Row: Model, Agent/Plan, and Send Button */}
+          <div className="flex items-center justify-between gap-2 p-2">
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Model selector */}
+              <Select
+                value={selectedModel}
+                options={MODEL_OPTIONS}
+                onChange={(value) => {
+                  const model = value as BuilderModelId
+                  setSelectedModel(model)
+                  setBuilderSettings({ selectedModel: model })
+                }}
+                className="min-w-[90px] bg-[#2d2d2d] border border-[#3e3e3e] rounded-md"
+              />
+              {/* Agent / Plan selector */}
+              <Select
+                value={agentMode}
+                options={[
+                  { value: 'Agent', label: 'Agent' },
+                  { value: 'Plan', label: 'Plan' }
+                ]}
+                onChange={(value) => setAgentMode(value as 'Agent' | 'Plan')}
+                className="w-16 bg-[#2d2d2d] border border-[#3e3e3e] rounded-md"
+              />
+            </div>
 
             {/* Send Button */}
             <Button

@@ -4,20 +4,20 @@ import { Button } from '../ui/button'
 import { EditorView } from './EditorView'
 import { JsonSplitView } from './JsonSplitView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
-import { LayoutRenderer, defaultLayoutRegistry, type LayoutNode } from './LayoutRenderer'
+import { BuilderSettingsView } from './BuilderSettingsView'
+import type { Spec } from '@json-render/core'
+import { Renderer, StateProvider, VisibilityProvider, ActionProvider } from '@json-render/react'
+import { registry } from '@/lib/json-render/registry'
+import { parseToSpec, isJsonRenderSpec } from '@/lib/json-render/layout-to-spec'
+
+export const SETTINGS_TAB_PATH = 'builder://settings'
 import { openFile as desktopOpenFile, saveFile as desktopSaveFile, appWriteTextFile, isTauri } from '@/desktop'
 import type { ActiveApp } from './IDELayout'
 import type { AgentResponsePayload } from './ChatPanel'
 import type { GetEditorSelection, EditorSelectionPayload } from './EditorView'
 
-function parseLayoutJson(content: string): LayoutNode | null {
-  try {
-    const node = JSON.parse(content)
-    if (node && typeof node === 'object' && node.type) return node as LayoutNode
-    return null
-  } catch {
-    return null
-  }
+function parseLayoutOrSpec(content: string): ReturnType<typeof parseToSpec> {
+  return parseToSpec(content)
 }
 import { Menu, Submenu, MenuItem, PredefinedMenuItem, CheckMenuItem } from '@tauri-apps/api/menu'
 import { listen } from '@tauri-apps/api/event'
@@ -203,6 +203,22 @@ export function BuilderDashboard({
     }
   }
 
+  const handleOpenBuilderSettings = () => {
+    const existing = openFiles.find((f) => f.path === SETTINGS_TAB_PATH)
+    if (existing) {
+      setActiveFile(existing)
+      return
+    }
+    const settingsFile: EditorFile = {
+      path: SETTINGS_TAB_PATH,
+      name: 'Builder Settings',
+      content: '',
+      isModified: false,
+    }
+    setOpenFiles((prev) => [...prev, settingsFile])
+    setActiveFile(settingsFile)
+  }
+
   const handleFileChange = (value: string) => {
     if (!activeFile) return
 
@@ -245,6 +261,7 @@ export function BuilderDashboard({
 
   const handleSave = async () => {
     if (!activeFile) return
+    if (activeFile.path === SETTINGS_TAB_PATH) return
     if (!isTauri()) return
     try {
       const result = await desktopSaveFile(activeFile.content, activeFile.path)
@@ -271,6 +288,7 @@ export function BuilderDashboard({
 
   const handleSaveAs = async () => {
     if (!activeFile) return
+    if (activeFile.path === SETTINGS_TAB_PATH) return
     if (!isTauri()) return
     try {
       const result = await desktopSaveFile(activeFile.content)
@@ -295,8 +313,8 @@ export function BuilderDashboard({
     }
   }
 
-  const handlersRef = useRef({ handleNewFile, handleOpenFile, handleSave, handleSaveAs })
-  handlersRef.current = { handleNewFile, handleOpenFile, handleSave, handleSaveAs }
+  const handlersRef = useRef({ handleNewFile, handleOpenFile, handleSave, handleSaveAs, handleOpenBuilderSettings })
+  handlersRef.current = { handleNewFile, handleOpenFile, handleSave, handleSaveAs, handleOpenBuilderSettings }
 
   // Debounce menu/shortcut handlers so duplicate events (e.g. shortcut + menu) only run once
   const menuLastCallRef = useRef<Record<string, number>>({})
@@ -381,6 +399,11 @@ export function BuilderDashboard({
           })
         },
       })
+      const builderSettingsItem = await MenuItem.new({
+        id: 'builder-settings',
+        text: 'Builder Settings',
+        action: () => runOnce('builder-settings', () => handlersRef.current.handleOpenBuilderSettings()),
+      })
       const quitItem = await MenuItem.new({
         id: 'quit',
         text: isMac ? 'Quit' : 'Exit',
@@ -390,7 +413,7 @@ export function BuilderDashboard({
 
       const fileSubmenu = await Submenu.new({
         text: 'File',
-        items: [newItem, openItem, separator, saveItem, saveAsItem, separator, autoSaveItem, separator, quitItem],
+        items: [newItem, openItem, separator, saveItem, saveAsItem, separator, autoSaveItem, separator, builderSettingsItem, separator, quitItem],
       })
 
       const undoItem = await PredefinedMenuItem.new({ item: 'Undo' })
@@ -539,21 +562,23 @@ export function BuilderDashboard({
     }
   }, [autoSave])
 
-  // Handle agent responses - open files from agent (write to uiConfigs when activeApp is set)
+  // Chat streams JSON → ChatPanel writes to uiConfigs/generated.json (Tauri) and sends { code, filePath, resolvedPath? }.
+  // We open the file in the editor and optionally write (e.g. when ChatPanel already wrote, we still refresh sidebar).
   useEffect(() => {
     if (!agentResponse) return
 
-    // If agent response contains code to create/edit files
     if (agentResponse.type === 'code' && agentResponse.content?.code) {
       const relativePath = agentResponse.content.filePath || 'untitled.ts'
       const pathJoin = (...parts: string[]) =>
         parts.filter(Boolean).join('/').replace(/\\/g, '/')
-      const resolvedPath = activeApp
-        ? pathJoin(activeApp.rootPath, relativePath)
-        : relativePath
+      // Use resolvedPath from ChatPanel when no app open (e.g. default builder-generated folder); else activeApp root
+      const resolvedPath =
+        agentResponse.content.resolvedPath ??
+        (activeApp ? pathJoin(activeApp.rootPath, relativePath) : relativePath)
+      const canWriteToDisk = isTauri() && (agentResponse.content.resolvedPath != null || activeApp != null)
 
       const writeAndOpen = async () => {
-        if (activeApp && isTauri()) {
+        if (canWriteToDisk) {
           try {
             await appWriteTextFile(resolvedPath, agentResponse.content.code)
             onAppFilesChanged?.()
@@ -566,14 +591,14 @@ export function BuilderDashboard({
           path: resolvedPath,
           name: fileName,
           content: agentResponse.content.code,
-          isModified: !activeApp,
+          isModified: !canWriteToDisk,
         }
         const existing = openFilesRef.current.find((f) => f.path === resolvedPath)
         if (existing) {
           const updatedFile: EditorFile = {
             ...existing,
             content: agentResponse.content.code,
-            isModified: !activeApp,
+            isModified: !canWriteToDisk,
           }
           setOpenFiles((prev) =>
             prev.map((f) => (f.path === resolvedPath ? updatedFile : f))
@@ -583,6 +608,8 @@ export function BuilderDashboard({
           setOpenFiles((prev) => [...prev, newFile])
           setActiveFile(newFile)
         }
+        // Show the UI preview when opening generated.json from agent so the rendering tree is visible
+        if (relativePath === 'uiConfigs/generated.json') setShowPreview(true)
         onAgentResponseProcessed?.()
       }
       writeAndOpen()
@@ -596,8 +623,26 @@ export function BuilderDashboard({
   }, [activeFile?.path])
 
   const isJsonFile = activeFile?.path?.toLowerCase().endsWith('.json')
-  const layoutNode = activeFile && isJsonFile ? parseLayoutJson(activeFile.content) : null
-  const showLayoutPreview = showPreview && isJsonFile && layoutNode
+  const layoutSpecFromFile = activeFile && isJsonFile ? parseLayoutOrSpec(activeFile.content) : null
+  // When agent just returned code for generated.json, use that spec so the UI tree renders even before file is focused
+  const generatedSpecFromAgent =
+    agentResponse?.type === 'code' &&
+    agentResponse.content?.filePath === 'uiConfigs/generated.json' &&
+    agentResponse.content?.code
+      ? (() => {
+          try {
+            const parsed = JSON.parse(agentResponse.content.code) as unknown
+            return isJsonRenderSpec(parsed) ? parsed : null
+          } catch {
+            return parseToSpec(agentResponse.content.code)
+          }
+        })()
+      : null
+  const layoutSpec = layoutSpecFromFile ?? generatedSpecFromAgent
+  const isGeneratedJson = agentResponse?.content?.filePath === 'uiConfigs/generated.json'
+  const showLayoutPreview =
+    !!layoutSpec &&
+    (showPreview && isJsonFile ? true : agentResponse?.type === 'code' && !!isGeneratedJson)
 
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
   const configShortcut = isMac ? '⌘1' : 'Ctrl+1'
@@ -668,14 +713,22 @@ export function BuilderDashboard({
           <div className="flex-1 flex items-center justify-center p-8 text-gray-300">
             Agent Response Viewer (to be implemented)
           </div>
+        ) : activeFile?.path === SETTINGS_TAB_PATH ? (
+          <BuilderSettingsView user={user} />
         ) : activeFile ? (
           showLayoutPreview ? (
             <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e]">
               <div className="min-h-full rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
-                <LayoutRenderer node={layoutNode!} registry={defaultLayoutRegistry} />
+                <StateProvider initialState={{}}>
+                  <VisibilityProvider>
+                    <ActionProvider handlers={{}}>
+                      <Renderer spec={layoutSpec as Spec} registry={registry} />
+                    </ActionProvider>
+                  </VisibilityProvider>
+                </StateProvider>
               </div>
             </div>
-          ) : layoutNode === null && showPreview && isJsonFile ? (
+          ) : layoutSpec === null && showPreview && isJsonFile ? (
             <div className="flex-1 flex items-center justify-center p-8 text-gray-400">
               Invalid layout JSON. Ensure the file has a root object with a <code className="bg-[#3e3e3e] px-1 rounded">type</code> field.
             </div>

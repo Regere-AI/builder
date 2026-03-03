@@ -1,0 +1,387 @@
+{
+  "Accordion": {
+    "props": []
+  },
+  "AccordionItem": {
+    "props": []
+  },
+  "AccordionTrigger": {
+    "props": []
+  },
+  "AccordionContent": {
+    "props": []
+  },
+  "Alert": {
+    "props": []
+  },
+  "AlertTitle": {
+    "props": []
+  },
+  "AlertDescription": {
+    "props": []
+  },
+  "Avatar": {
+    "props": []
+  },
+  "AvatarImage": {
+    "props": []
+  },
+  "AvatarFallback": {
+    "props": []
+  },
+  "Badge": {
+    "props": []
+  },
+  "Breadcrumb": {
+    "props": []
+  },
+  "BreadcrumbList": {
+    "props": []
+  },
+  "BreadcrumbItem": {
+    "props": []
+  },
+  "BreadcrumbLink": {
+    "props": []
+  },
+  "BreadcrumbPage": {
+    "props": []
+  },
+  "BreadcrumbSeparator": {
+    "props": []
+  },
+  "BreadcrumbEllipsis": {
+    "props": []
+  },
+  "Button": {
+    "interactive": true,
+    "props": [
+      "disabled",
+      "size",
+      "variant"
+    ],
+    "variants": [
+      "default",
+      "destructive",
+      "outline",
+      "secondary"
+    ],
+    "sizes": [
+      "default",
+      "lg",
+      "sm"
+    ]
+  },
+  "ButtonGroup": {
+    "props": []
+  },
+  "Card": {
+    "props": [
+      "variant"
+    ]
+  },
+  "CardHeader": {
+    "props": []
+  },
+  "CardTitle": {
+    "props": []
+  },
+  "CardDescription": {
+    "props": []
+  },
+  "CardContent": {
+    "props": []
+  },
+  "CardFooter": {
+    "props": []
+  },
+  "AreaChart": {
+    "props": [],
+    "acceptsData": "multi-series",
+    "dataSchema": "array<{ name: string; value: number }>"
+  },
+  "BarChart": {
+    "props": [],
+    "acceptsData": "multi-series",
+    "dataSchema": "array<{ name: string; value: number }>"
+  },
+  "ComposedChart": {
+    "props": [],
+    "acceptsData": "multi-series",
+    "dataSchema": "array<{ name: string; value: number }>"
+  },
+  "LineChart": {
+    "props": [],
+    "acceptsData": "multi-series",
+    "dataSchema": "array<{ name: string; value: number }>"
+  },
+  "PieChart": {
+    "props": [],
+    "acceptsData": "multi-series",
+    "dataSchema": "array<{ name: string; value: number }>"
+  },
+  "RadarChart": {
+    "props": [],
+    "acceptsData": "multi-series",
+    "dataSchema": "array<{ name: string; value: number }>"
+  },
+  "Checkbox": {
+    "interactive": true,
+    "props": [
+      "checked",
+      "defaultChecked",
+      "disabled"
+    ]
+  },
+  "DataTable": {
+    "props": [
+      "bulkActions",
+      "caption",
+      "cellRenderers",
+      "className",
+      "columns",
+      "data",
+      "emptyMessage",
+      "filterValues",
+      "filters",
+      "getRowId",
+      "isLoading",
+      "mode",
+      "onFilterChange",
+      "onPageChange",
+      "onPageSizeChange",
+      "onSelectionChange",
+      "onSortingChange",
+      "page",
+      "pageSize",
+      "pagination",
+      "rowActions",
+      "selectedRowIds",
+      "sorting"
+    ]
+  },
+  "Form": {
+    "props": []
+  },
+  "Input": {
+    "interactive": true,
+    "props": [
+      "disabled",
+      "placeholder",
+      "type"
+    ]
+  },
+  "Label": {
+    "props": []
+  },
+  "DragDropLayout": {
+    "props": []
+  },
+  "FlowLayout": {
+    "props": []
+  },
+  "FreePositionLayout": {
+    "props": []
+  },
+  "AutoGridLayout": {
+    "props": []
+  },
+  "CardLayout": {
+    "props": []
+  },
+  "MasonryLayout": {
+    "props": []
+  },
+  "ResponsiveDashboard": {
+    "props": []
+  },
+  "SectionLayout": {
+    "props": []
+  },
+  "ModalLayout": {
+    "props": []
+  },
+  "PanelLayout": {
+    "props": []
+  },
+  "StepperLayout": {
+    "props": []
+  },
+  "WizardLayout": {
+    "props": []
+  },
+  "Box": {
+    "props": []
+  },
+  "Container": {
+    "props": []
+  },
+  "Flex": {
+    "props": []
+  },
+  "Grid": {
+    "props": []
+  },
+  "Spacer": {
+    "props": []
+  },
+  "Stack": {
+    "props": []
+  },
+  "AccordionLayout": {
+    "props": []
+  },
+  "HeaderFooterLayout": {
+    "props": []
+  },
+  "SidebarLayout": {
+    "props": []
+  },
+  "SplitPane": {
+    "props": []
+  },
+  "TabsLayout": {
+    "props": []
+  },
+  "Modal": {
+    "props": []
+  },
+  "Dialog": {
+    "props": []
+  },
+  "DialogPortal": {
+    "props": []
+  },
+  "DialogOverlay": {
+    "props": []
+  },
+  "DialogClose": {
+    "props": []
+  },
+  "DialogTrigger": {
+    "props": []
+  },
+  "DialogContent": {
+    "props": []
+  },
+  "DialogHeader": {
+    "props": []
+  },
+  "DialogFooter": {
+    "props": []
+  },
+  "DialogTitle": {
+    "props": []
+  },
+  "DialogDescription": {
+    "props": []
+  },
+  "Popover": {
+    "props": []
+  },
+  "PopoverTrigger": {
+    "props": []
+  },
+  "PopoverContent": {
+    "props": []
+  },
+  "Progress": {
+    "props": [],
+    "acceptsData": "single-value",
+    "dataSchema": "number (0-100)"
+  },
+  "RadioGroup": {
+    "interactive": true,
+    "acceptsOptions": true,
+    "props": []
+  },
+  "RadioGroupItem": {
+    "interactive": true,
+    "props": []
+  },
+  "Select": {
+    "interactive": true,
+    "acceptsOptions": true,
+    "acceptsChildren": false,
+    "requiredProps": [],
+    "structure": "leaf",
+    "props": ["isClearable", "isMulti", "isSearchable", "placeholder"]
+  },
+  "Separator": {
+    "props": []
+  },
+  "SideNavigation": {
+    "props": [
+      "defaultPinned",
+      "secondaryMenuWidth",
+      "showSecondaryMenuOnHover",
+      "width"
+    ]
+  },
+  "Skeleton": {
+    "props": []
+  },
+  "Slider": {
+    "interactive": true,
+    "props": []
+  },
+  "Spinner": {
+    "props": []
+  },
+  "Switch": {
+    "interactive": true,
+    "props": []
+  },
+  "Table": {
+    "props": []
+  },
+  "TableHeader": {
+    "props": []
+  },
+  "TableBody": {
+    "props": []
+  },
+  "TableFooter": {
+    "props": []
+  },
+  "TableHead": {
+    "props": []
+  },
+  "TableRow": {
+    "props": []
+  },
+  "TableCell": {
+    "props": []
+  },
+  "TableCaption": {
+    "props": []
+  },
+  "Tabs": {
+    "props": []
+  },
+  "TabsList": {
+    "props": []
+  },
+  "TabsTrigger": {
+    "props": []
+  },
+  "TabsContent": {
+    "props": []
+  },
+  "Textarea": {
+    "interactive": true,
+    "props": []
+  },
+  "Tooltip": {
+    "props": []
+  },
+  "TooltipTrigger": {
+    "props": []
+  },
+  "TooltipContent": {
+    "props": []
+  },
+  "TooltipProvider": {
+    "props": []
+  }
+}
