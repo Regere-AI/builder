@@ -8,6 +8,7 @@ import { BuilderSettingsView } from './BuilderSettingsView'
 import type { Spec } from '@json-render/core'
 import { Renderer, JSONUIProvider } from '@json-render/react'
 import { registry } from '@/lib/json-render/registry'
+import { jsonRenderStateStore } from '@/lib/json-render/zustand-store'
 import { parseToSpec, isJsonRenderSpec } from '@/lib/json-render/layout-to-spec'
 
 export const SETTINGS_TAB_PATH = 'builder://settings'
@@ -719,7 +720,7 @@ export function BuilderDashboard({
           showLayoutPreview ? (
             <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e]">
               <div className="min-h-full rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
-                <JSONUIProvider registry={registry} initialState={{}} handlers={{}}>
+                <JSONUIProvider registry={registry} store={jsonRenderStateStore} handlers={{}}>
                   <Renderer spec={layoutSpec as Spec} registry={registry} />
                 </JSONUIProvider>
               </div>

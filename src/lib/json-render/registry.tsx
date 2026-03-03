@@ -91,7 +91,9 @@ export const { registry } = defineRegistry(catalog, {
                 ? 'flex-end'
                 : props.align === 'center'
                   ? 'center'
-                  : 'stretch',
+                  : props.align === 'stretch'
+                    ? 'stretch'
+                    : 'flex-start',
           justifyContent:
             props.justify === 'start'
               ? 'flex-start'
