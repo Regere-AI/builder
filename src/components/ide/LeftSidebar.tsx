@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
-import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search, Package, LayoutDashboard, GitBranch } from 'lucide-react'
+import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search, Package, LayoutDashboard, GitBranch, FileText, Layers, Plus, Trash2, X, Sparkles } from 'lucide-react'
 import { Tree } from 'react-arborist'
 import type { NodeRendererProps } from 'react-arborist'
 import type { TreeApi } from 'react-arborist'
@@ -15,6 +15,7 @@ import {
   appDelete,
 } from '@/desktop'
 import type { ActiveApp } from './IDELayout'
+import { GitPanel } from './GitPanel'
 
 function pathJoin(...parts: string[]): string {
   return parts
@@ -229,9 +230,8 @@ function SidebarNode({
 
   const rowContent = (
     <div
-      style={style}
       className={cn(
-        'flex items-center gap-1 py-0.5 px-1 rounded text-left text-sm truncate cursor-pointer',
+        'flex items-center gap-1 py-0.5 px-1 rounded text-left text-sm cursor-pointer min-w-0 w-full overflow-hidden',
         isSelected ? 'bg-[#094771] hover:bg-[#094771]' : 'hover:bg-[#2a2d2e]'
       )}
       onClick={(e) => {
@@ -273,7 +273,7 @@ function SidebarNode({
           )}
         </>
       )}
-      <span className="truncate">{data.name}</span>
+      <span className="truncate min-w-0" title={data.name}>{data.name}</span>
     </div>
   )
 
@@ -337,10 +337,12 @@ function SidebarNode({
 interface LeftSidebarProps {
   expanded: boolean
   onToggle: () => void
+  sidebarView: 'files' | 'git'
+  onSidebarViewChange: (view: 'files' | 'git') => void
   activeApp: ActiveApp | null
   onOpenApp: (app: ActiveApp | null) => void
   onCloseApp: () => void
-  onOpenFile?: (path: string, content: string) => void
+  onOpenFile?: (path: string, content: string, options?: { fromGit?: boolean }) => void
   /** Called after files/folders are deleted so the editor can close them. */
   onDeletePaths?: (paths: string[]) => void
   /** Increment to refresh the file tree (e.g. after chat creates a file in the app). */
@@ -357,6 +359,8 @@ interface TreeNode {
 export function LeftSidebar({
   expanded,
   onToggle,
+  sidebarView,
+  onSidebarViewChange,
   activeApp,
   onOpenApp: _onOpenApp,
   onCloseApp: _onCloseApp,
@@ -610,11 +614,11 @@ export function LeftSidebar({
     }
   }
 
-  const handleFileClick = async (path: string) => {
+  const handleFileClick = async (path: string, options?: { fromGit?: boolean }) => {
     if (!onOpenFile) return
     try {
       const content = await appReadTextFile(path)
-      onOpenFile(path, content)
+      onOpenFile(path, content, options)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -716,13 +720,53 @@ export function LeftSidebar({
   return (
     <div
       className={cn(
-        'bg-[#252526] border-r border-[#3e3e3e] transition-all duration-200 flex flex-col',
-        expanded ? 'w-64' : 'w-12'
+        'bg-[#252526] border-r border-[#3e3e3e] transition-all duration-200 flex',
+        expanded ? 'w-[304px]' : 'w-12'
       )}
     >
+      {/* Activity bar */}
+      <div className="w-12 shrink-0 flex flex-col border-r border-[#3e3e3e] bg-[#333333]">
+        <button
+          type="button"
+          onClick={() => { onSidebarViewChange('files'); if (!expanded) onToggle() }}
+          className={cn(
+            'flex items-center justify-center p-3 transition-colors',
+            sidebarView === 'files' ? 'bg-[#252526] text-[#007acc]' : 'text-gray-400 hover:text-gray-200 hover:bg-[#2d2d2d]'
+          )}
+          title="Explorer"
+        >
+          <FileText className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => { onSidebarViewChange('git'); if (!expanded) onToggle() }}
+          className={cn(
+            'flex items-center justify-center p-3 transition-colors',
+            sidebarView === 'git' ? 'bg-[#252526] text-[#007acc]' : 'text-gray-400 hover:text-gray-200 hover:bg-[#2d2d2d]'
+          )}
+          title="Source Control"
+        >
+          <GitBranch className="w-5 h-5" />
+        </button>
+        <div className="flex-1 min-h-0" />
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center justify-center p-3 hover:bg-[#2d2d2d] text-gray-400 hover:text-gray-200 transition-colors"
+          title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
+          <ChevronRight
+            className={cn('w-4 h-4 transition-transform', !expanded && 'rotate-180')}
+          />
+        </button>
+      </div>
+
+      {/* Content panel - Files or Git */}
       {expanded && (
-        <>
-          {activeApp && (
+        <div className="w-64 shrink-0 flex flex-col bg-[#252526] min-h-0">
+          {sidebarView === 'files' ? (
+            <>
+              {activeApp && (
             <div className="p-2 border-b border-[#3e3e3e] flex flex-col gap-2">
               <div className="flex items-center gap-1 min-w-0">
                 <span className="truncate text-sm font-medium text-gray-200" title={activeApp.name}>
@@ -768,7 +812,7 @@ export function LeftSidebar({
               <p className="text-xs text-gray-500 px-1 shrink-0">Loading…</p>
             )}
             {activeApp && !loading && (
-              <div ref={treeContainerRef} className="flex-1 min-h-0 overflow-hidden -mx-1">
+              <div ref={treeContainerRef} className="sidebar-tree-container flex-1 min-h-0 overflow-hidden -mx-1">
                 <Tree<TreeNode>
                   ref={(api) => {
                     treeRef.current = api ?? null
@@ -832,22 +876,150 @@ export function LeftSidebar({
                 </Tree>
               </div>
             )}
-          </div>
-        </>
-      )}
 
-      <div className="border-t border-[#3e3e3e] p-2 shrink-0">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="w-full flex items-center justify-center p-2 hover:bg-[#2a2d2e] rounded transition-colors"
-          title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
-        >
-          <ChevronRight
-            className={cn('w-4 h-4 transition-transform', !expanded && 'rotate-180')}
-          />
-        </button>
-      </div>
+            {/* UI Registries collapsible pane */}
+            <div className="shrink-0 border-t border-[#3e3e3e] mt-2 pt-2">
+              <div className="flex items-center gap-0.5 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setUiRegistriesOpen(!uiRegistriesOpen)}
+                  className="flex-1 flex items-center gap-2 px-1 py-1.5 rounded text-left text-sm text-gray-300 hover:bg-[#2a2d2e] hover:text-gray-200 transition-colors min-w-0"
+                >
+                  {uiRegistriesOpen ? (
+                    <ChevronDown className="w-4 h-4 shrink-0 text-gray-500" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 shrink-0 text-gray-500" />
+                  )}
+                  <Layers className="w-4 h-4 shrink-0 text-gray-500" />
+                  <span className="truncate font-medium">UI registry docs</span>
+                </button>
+                {uiRegistriesOpen && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddRegistry(true)
+                      setNewRegistryPackage('')
+                    }}
+                    className="p-1.5 rounded hover:bg-[#2a2d2e] text-gray-400 hover:text-gray-200 shrink-0"
+                    title="Add UI registry doc (npm package)"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              {uiRegistriesOpen && (
+                <div className="mt-1 max-h-48 overflow-y-auto -mx-1 px-1 space-y-0.5">
+                  {registryPackages.length === 0 && !showAddRegistry && (
+                    <p className="py-2 text-xs text-gray-500 italic">No registry docs</p>
+                  )}
+                  {registryPackages.map((pkg) => (
+                    <div
+                      key={pkg}
+                      className="group flex items-center gap-2 py-1.5 px-2 rounded text-xs hover:bg-[#2a2d2e] min-w-0"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => openRegistryComponentsDialog(pkg)}
+                        className="flex-1 min-w-0 flex items-center text-left truncate text-gray-400 hover:text-gray-200"
+                        title={`View components in ${pkg}`}
+                      >
+                        <span className="truncate" title={pkg}>
+                          {pkg}
+                        </span>
+                      </button>
+                      <a
+                        href={npmPackageUrl(pkg)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="shrink-0 text-[#007acc] hover:underline"
+                        title={`View on npm: ${pkg}`}
+                      >
+                        npm
+                      </a>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          removeRegistryPackage(pkg)
+                        }}
+                        className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-[#3e3e3e] text-gray-400 hover:text-red-400"
+                        title="Remove registry doc"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {showAddRegistry && (
+                    <div className="py-2 space-y-2">
+                      <input
+                        type="text"
+                        value={newRegistryPackage}
+                        onChange={(e) => setNewRegistryPackage(e.target.value)}
+                        placeholder="e.g. @kaushik91/rupa"
+                        className="w-full rounded border border-[#3e3e3e] bg-[#2a2d2e] px-2 py-1.5 text-xs text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#007acc]/50"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const p = newRegistryPackage.trim()
+                            if (p) {
+                              addRegistryPackage(p)
+                              setNewRegistryPackage('')
+                              setShowAddRegistry(false)
+                            }
+                          }
+                          if (e.key === 'Escape') setShowAddRegistry(false)
+                        }}
+                        autoFocus
+                      />
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const p = newRegistryPackage.trim()
+                            if (p) {
+                              addRegistryPackage(p)
+                              setNewRegistryPackage('')
+                              setShowAddRegistry(false)
+                            }
+                          }}
+                          className="rounded px-2 py-1 text-xs font-medium bg-[#007acc]/80 text-white hover:bg-[#007acc]"
+                        >
+                          Add
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowAddRegistry(false)
+                            setNewRegistryPackage('')
+                          }}
+                          className="rounded px-2 py-1 text-xs font-medium text-gray-400 hover:bg-[#2a2d2e] hover:text-gray-200"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+            </>
+          ) : (
+            <GitPanel
+              isOpen={true}
+              onClose={() => onSidebarViewChange('files')}
+              repoPath={activeApp?.rootPath ?? null}
+              embedded
+              refreshTrigger={refreshTrigger}
+              onOpenFileFromGit={(relativePath) => {
+                if (!activeApp?.rootPath || !onOpenFile) return
+                const fullPath = `${activeApp.rootPath}/${relativePath}`.replace(/\\/g, '/')
+                handleFileClick(fullPath, { fromGit: true })
+              }}
+            />
+          )}
+        </div>
+      )}
 
       {/* Create new file type dialog */}
       {showCreateFileDialog && (

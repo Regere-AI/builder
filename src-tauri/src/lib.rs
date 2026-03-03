@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api;
+mod file_watcher;
+mod git;
 
 use serde::Serialize;
 use std::fs;
@@ -131,6 +133,10 @@ fn app_read_dir(dir_path: String) -> Result<Vec<DirEntry>, String> {
         let entry = entry.map_err(|e| e.to_string())?;
         let name = entry.file_name().to_string_lossy().into_owned();
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        // Hide .git so it cannot be deleted from the UI
+        if name == ".git" {
+            continue;
+        }
         result.push(DirEntry { name, is_dir });
     }
     result.sort_by(|a, b| {
@@ -426,6 +432,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
+        .manage(file_watcher::WatcherState(std::sync::Mutex::new(None)))
         .setup(|app| {
             #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
             {
@@ -511,6 +518,20 @@ pub fn run() {
             app_delete,
             get_default_workspace_root,
             ensure_app_folder,
+            git::git_status,
+            git::git_is_repo,
+            git::git_commit,
+            git::git_commit_staged,
+            git::git_commit_amend,
+            git::git_add,
+            git::git_reset,
+            git::git_push,
+            git::git_discard,
+            git::git_diff_file,
+            git::git_show_file,
+            git::git_clone,
+            file_watcher::watch_directory,
+            file_watcher::stop_watching,
             api::api_signup,
             api::api_send_otp,
             api::api_verify_otp,

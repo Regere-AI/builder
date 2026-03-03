@@ -5,6 +5,7 @@ import { ChatPanel, type AgentResponsePayload } from './ChatPanel'
 import type { EditorSelectionPayload } from './EditorView'
 import { StatusBar } from './StatusBar'
 import type { LaunchpadConfig } from '@/services/api'
+import { isTauri, watchDirectory, stopWatching, listenFileChanged } from '@/desktop'
 
 interface User {
   firstName: string
@@ -30,15 +31,18 @@ interface IDELayoutProps {
 
 export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp, onCloseApp, selectedLaunchpad, onSwitchLaunchpad }: IDELayoutProps) {
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
+  const [sidebarView, setSidebarView] = useState<'files' | 'git'>('files')
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
   const [chatPanelWidth, setChatPanelWidth] = useState(320)
   const [pendingChatContext, setPendingChatContext] = useState<EditorSelectionPayload | null>(null)
   const [agentResponse, setAgentResponse] = useState<AgentResponsePayload | undefined>(undefined)
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0)
-  const openFileFromSidebarHandlerRef = useRef<((path: string, content: string) => void) | null>(null)
+  const [fileChangeTrigger, setFileChangeTrigger] = useState(0)
+  const openFileFromSidebarHandlerRef = useRef<((path: string, content: string, options?: { fromGit?: boolean }) => void) | null>(null)
   const filesDeletedFromSidebarHandlerRef = useRef<((paths: string[]) => void) | null>(null)
-  const handleOpenFileFromSidebar = useCallback((path: string, content: string) => {
-    openFileFromSidebarHandlerRef.current?.(path, content)
+  const fileChangeUnlistenRef = useRef<null | (() => void)>(null)
+  const handleOpenFileFromSidebar = useCallback((path: string, content: string, options?: { fromGit?: boolean }) => {
+    openFileFromSidebarHandlerRef.current?.(path, content, options)
   }, [])
   const handleFilesDeletedFromSidebar = useCallback((paths: string[]) => {
     filesDeletedFromSidebarHandlerRef.current?.(paths)
@@ -73,14 +77,68 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
     }
   }, [])
 
+  // Watch the active app folder for file changes (via Tauri notify watcher).
+  // When files change, refresh sidebar (files + Git panel) and diff markers in editor.
+  useEffect(() => {
+    if (!isTauri()) return
+
+    let cancelled = false
+
+    const startWatching = async () => {
+      try {
+        // Stop any existing watcher
+        if (fileChangeUnlistenRef.current) {
+          fileChangeUnlistenRef.current()
+          fileChangeUnlistenRef.current = null
+        }
+        if (!activeApp?.rootPath) {
+          await stopWatching().catch(() => {})
+          return
+        }
+
+        await watchDirectory(activeApp.rootPath)
+
+        const unlisten = await listenFileChanged(({ payload }) => {
+          if (cancelled) return
+          if (!Array.isArray(payload) || payload.length === 0) return
+          // Trigger sidebar and Git panel refresh
+          setSidebarRefreshTrigger((n) => n + 1)
+          // Trigger diff refresh in BuilderDashboard
+          setFileChangeTrigger((n) => n + 1)
+        })
+
+        if (cancelled) {
+          unlisten()
+        } else {
+          fileChangeUnlistenRef.current = unlisten
+        }
+      } catch (e) {
+        console.error('Failed to start file watcher', e)
+      }
+    }
+
+    startWatching()
+
+    return () => {
+      cancelled = true
+      if (fileChangeUnlistenRef.current) {
+        fileChangeUnlistenRef.current()
+        fileChangeUnlistenRef.current = null
+      }
+      stopWatching().catch(() => {})
+    }
+  }, [activeApp?.rootPath, setSidebarRefreshTrigger])
+
   return (
     <div className="w-screen h-screen bg-[#1e1e1e] flex flex-col text-gray-300 overflow-hidden">
       {/* Main Layout */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar */}
+        {/* Left Sidebar with activity bar */}
         <LeftSidebar
           expanded={sidebarExpanded}
           onToggle={() => setSidebarExpanded(!sidebarExpanded)}
+          sidebarView={sidebarView}
+          onSidebarViewChange={setSidebarView}
           activeApp={activeApp}
           onOpenApp={onOpenApp}
           onCloseApp={onCloseApp}
@@ -100,6 +158,7 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
           onAppFilesChanged={() => setSidebarRefreshTrigger((n) => n + 1)}
           onAgentResponseProcessed={() => setAgentResponse(undefined)}
           onAddSelectionToChat={handleAddSelectionToChat}
+          fileChangeTrigger={fileChangeTrigger}
         />
 
         {/* Right Chat Panel */}

@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 
 export interface OpenFileResult {
   canceled?: boolean
@@ -96,6 +97,110 @@ export async function ensureAppFolder(
     workspaceRoot,
     appFolderName,
     displayName,
+  })
+}
+
+// ----- Git CLI -----
+
+export interface GitStatusEntry {
+  path: string
+  status: string
+  indexStatus: string
+  workTreeStatus: string
+  staged: boolean
+}
+
+export interface GitStatusResult {
+  entries: GitStatusEntry[]
+  isRepo: boolean
+}
+
+/** Check if the given path is inside a git repository. */
+export async function gitIsRepo(path: string): Promise<boolean> {
+  return invoke<boolean>('git_is_repo', { path })
+}
+
+/** Get git status for the given repository path. */
+export async function gitStatus(repoPath: string): Promise<GitStatusResult> {
+  return invoke<GitStatusResult>('git_status', { repoPath })
+}
+
+/** Stage all changes and commit with the given message. */
+export async function gitCommit(repoPath: string, message: string): Promise<void> {
+  return invoke<void>('git_commit', { repoPath, message })
+}
+
+/** Stage specific files. Pass empty array to stage all. */
+export async function gitAdd(repoPath: string, paths: string[]): Promise<void> {
+  return invoke<void>('git_add', { repoPath, paths })
+}
+
+/** Unstage specific files. */
+export async function gitReset(repoPath: string, paths: string[]): Promise<void> {
+  return invoke<void>('git_reset', { repoPath, paths })
+}
+
+/** Commit only staged changes (no add -A). */
+export async function gitCommitStaged(repoPath: string, message: string): Promise<void> {
+  return invoke<void>('git_commit_staged', { repoPath, message })
+}
+
+/** Amend the last commit. Pass message to change it, or omit to keep. */
+export async function gitCommitAmend(repoPath: string, message?: string): Promise<void> {
+  return invoke<void>('git_commit_amend', { repoPath, message })
+}
+
+/** Push to upstream. */
+export async function gitPush(repoPath: string): Promise<void> {
+  return invoke<void>('git_push', { repoPath })
+}
+
+/** Discard changes for a file (restore modified, remove untracked). */
+export async function gitDiscard(repoPath: string, path: string): Promise<void> {
+  return invoke<void>('git_discard', { repoPath, path })
+}
+
+export interface GitDiffRange {
+  startLine: number
+  endLine: number
+}
+
+/** Get line ranges of modified/added lines in a file (working tree vs HEAD). */
+export async function gitDiffFile(
+  repoPath: string,
+  filePath: string
+): Promise<GitDiffRange[]> {
+  return invoke<GitDiffRange[]>('git_diff_file', { repoPath, filePath })
+}
+
+/** Clone a git repository into the given target path. Returns the cloned path. */
+export async function gitClone(repoUrl: string, targetPath: string): Promise<string> {
+  return invoke<string>('git_clone', { repoUrl, targetPath })
+}
+
+/** Get the contents of a file at HEAD (for diff view). */
+export async function gitShowFile(repoPath: string, filePath: string): Promise<string> {
+  return invoke<string>('git_show_file', { repoPath, filePath })
+}
+
+// ----- File watching -----
+
+/** Start watching a directory for file changes. Emits "file-changed" when files change. */
+export async function watchDirectory(path: string): Promise<void> {
+  return invoke<void>('watch_directory', { path })
+}
+
+/** Stop watching. */
+export async function stopWatching(): Promise<void> {
+  return invoke<void>('stop_watching')
+}
+
+/** Listen for file-changed events. Returns an unsubscribe function. */
+export function listenFileChanged(
+  callback: (event: { payload: string[] }) => void
+): Promise<() => void> {
+  return listen<string[]>('file-changed', (event) => {
+    callback({ payload: event.payload })
   })
 }
 
