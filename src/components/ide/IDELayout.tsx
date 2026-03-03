@@ -87,7 +87,6 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
           onOpenFile={handleOpenFileFromSidebar}
           onDeletePaths={handleFilesDeletedFromSidebar}
           refreshTrigger={sidebarRefreshTrigger}
-          selectedLaunchpad={selectedLaunchpad}
         />
 
         {/* Center Content - BuilderDashboard */}
