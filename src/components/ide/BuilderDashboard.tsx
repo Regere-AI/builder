@@ -11,7 +11,15 @@ import { registry } from '@/lib/json-render/registry'
 import { parseToSpec, isJsonRenderSpec } from '@/lib/json-render/layout-to-spec'
 
 export const SETTINGS_TAB_PATH = 'builder://settings'
-import { openFile as desktopOpenFile, saveFile as desktopSaveFile, appWriteTextFile, isTauri, gitDiffFile, gitShowFile } from '@/desktop'
+import {
+  openFile as desktopOpenFile,
+  saveFile as desktopSaveFile,
+  appWriteTextFile,
+  appReadTextFile,
+  isTauri,
+  gitDiffFile,
+  gitShowFile,
+} from '@/desktop'
 import type { ActiveApp } from './IDELayout'
 import type { AgentResponsePayload } from './ChatPanel'
 import type { GetEditorSelection, EditorSelectionPayload } from './EditorView'
@@ -41,6 +49,8 @@ interface BuilderDashboardProps {
   onAddSelectionToChat?: (payload: EditorSelectionPayload) => void
   /** Incremented when files change on disk (notify watcher) so we can refresh git diff. */
   fileChangeTrigger?: number
+  /** Incremented when Pull or branch switch completes so we reload open files from disk. */
+  reloadOpenFilesTrigger?: number
 }
 
 export function BuilderDashboard({
@@ -54,6 +64,7 @@ export function BuilderDashboard({
   agentResponse,
   onAddSelectionToChat,
   fileChangeTrigger,
+  reloadOpenFilesTrigger,
 }: BuilderDashboardProps) {
   const AUTO_SAVE_KEY = 'builder-auto-save'
   const [openFiles, setOpenFiles] = useState<EditorFile[]>([])
@@ -94,6 +105,59 @@ export function BuilderDashboard({
       cancelled = true
     }
   }, [activeFile?.path, activeApp?.rootPath, fileChangeTrigger])
+
+  // When Pull or branch switch completes, reload open files from disk so editor shows latest content.
+  useEffect(() => {
+    if (
+      reloadOpenFilesTrigger == null ||
+      reloadOpenFilesTrigger === 0 ||
+      !activeApp?.rootPath ||
+      !isTauri()
+    ) {
+      return
+    }
+    const root = activeApp.rootPath.replace(/\\/g, '/').toLowerCase()
+    const isUnderRoot = (path: string) => {
+      const normalized = path.replace(/\\/g, '/').toLowerCase()
+      return normalized.startsWith(root) || normalized.startsWith(root + '/')
+    }
+    const filesToReload = openFilesRef.current.filter(
+      (f) =>
+        f.path !== SETTINGS_TAB_PATH &&
+        !f.isModified &&
+        (f.path.includes('/') || f.path.includes('\\')) &&
+        isUnderRoot(f.path)
+    )
+    let cancelled = false
+    const reload = async () => {
+      const updates = new Map<string, string>()
+      for (const file of filesToReload) {
+        if (cancelled) return
+        try {
+          const content = await appReadTextFile(file.path)
+          if (!cancelled) updates.set(file.path, content)
+        } catch {
+          // File may have been deleted or path invalid; skip
+        }
+      }
+      if (cancelled || updates.size === 0) return
+      setOpenFiles((prev) =>
+        prev.map((f) => {
+          const content = updates.get(f.path)
+          return content !== undefined ? { ...f, content } : f
+        })
+      )
+      setActiveFile((prev) => {
+        if (!prev) return prev
+        const content = updates.get(prev.path)
+        return content !== undefined ? { ...prev, content } : prev
+      })
+    }
+    reload()
+    return () => {
+      cancelled = true
+    }
+  }, [reloadOpenFilesTrigger, activeApp?.rootPath])
 
   useEffect(() => {
     if (!registerOpenFileFromSidebar) return

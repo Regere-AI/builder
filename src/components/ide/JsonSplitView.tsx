@@ -61,15 +61,14 @@ export function JsonSplitView({
   const onRegisterRef = useRef(onRegisterGetSelection)
   onRegisterRef.current = onRegisterGetSelection
 
-  // Sync from file only when switching to a different file. When we edit (left or right),
-  // we update state in the handlers and notify parent; we must not overwrite with
-  // file.content here or the editor will reset and edits won't stick.
+  // Sync from file when switching to a different file or when content is updated externally (e.g. reload after pull/branch switch).
+  // When we edit (left or right), we update state and notify parent; parent passes back the same content so this won't overwrite.
   useEffect(() => {
     setCodeContent(file.content)
     const { value, error } = tryParseJson(file.content)
     setParseError(error)
     if (error == null) setLastValidValue(value)
-  }, [file.path])
+  }, [file.path, file.content])
 
   const handleJsonEditorChange = useCallback(
     (value: JsonValue) => {

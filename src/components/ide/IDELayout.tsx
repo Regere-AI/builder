@@ -38,6 +38,13 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
   const [agentResponse, setAgentResponse] = useState<AgentResponsePayload | undefined>(undefined)
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0)
   const [fileChangeTrigger, setFileChangeTrigger] = useState(0)
+  const [reloadOpenFilesTrigger, setReloadOpenFilesTrigger] = useState(0)
+
+  const handleGitAffectedFiles = useCallback(() => {
+    setReloadOpenFilesTrigger((n) => n + 1)
+    setSidebarRefreshTrigger((n) => n + 1)
+    setFileChangeTrigger((n) => n + 1)
+  }, [])
   const openFileFromSidebarHandlerRef = useRef<((path: string, content: string, options?: { fromGit?: boolean }) => void) | null>(null)
   const filesDeletedFromSidebarHandlerRef = useRef<((paths: string[]) => void) | null>(null)
   const fileChangeUnlistenRef = useRef<null | (() => void)>(null)
@@ -154,6 +161,7 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
           onOpenFile={handleOpenFileFromSidebar}
           onDeletePaths={handleFilesDeletedFromSidebar}
           refreshTrigger={sidebarRefreshTrigger}
+          onPullOrBranchChange={handleGitAffectedFiles}
         />
 
         {/* Center Content - BuilderDashboard */}
@@ -168,6 +176,7 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
           onAgentResponseProcessed={() => setAgentResponse(undefined)}
           onAddSelectionToChat={handleAddSelectionToChat}
           fileChangeTrigger={fileChangeTrigger}
+          reloadOpenFilesTrigger={reloadOpenFilesTrigger}
         />
 
         {/* Right Chat Panel */}
@@ -189,10 +198,7 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
         selectedLaunchpad={selectedLaunchpad}
         onSwitchLaunchpad={onSwitchLaunchpad}
         repoPath={activeApp?.rootPath ?? null}
-        onBranchChanged={() => {
-          setSidebarRefreshTrigger((n) => n + 1)
-          setFileChangeTrigger((n) => n + 1)
-        }}
+        onBranchChanged={handleGitAffectedFiles}
       />
     </div>
   )

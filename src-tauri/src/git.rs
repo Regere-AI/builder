@@ -1,7 +1,19 @@
 //! Git CLI integration: status and repo detection via std::process::Command.
+//! All commands run blocking git operations in spawn_blocking to avoid freezing the UI.
 
 use serde::Serialize;
 use std::process::Command;
+
+async fn run_blocking<F, T>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(std::convert::identity)
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,9 +36,7 @@ pub struct GitStatusResult {
     pub is_repo: bool,
 }
 
-/// Check if the given path is inside a git repository.
-#[tauri::command]
-pub fn git_is_repo(path: String) -> Result<bool, String> {
+fn git_is_repo_sync(path: String) -> Result<bool, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--is-inside-work-tree"])
         .current_dir(&path)
@@ -40,12 +50,17 @@ pub fn git_is_repo(path: String) -> Result<bool, String> {
     Ok(stdout == "true")
 }
 
+/// Check if the given path is inside a git repository.
+#[tauri::command]
+pub async fn git_is_repo(path: String) -> Result<bool, String> {
+    run_blocking(move || git_is_repo_sync(path)).await
+}
+
 /// Get git status for the given repository path.
 /// Returns entries with path and status (e.g. "M", "??", "A").
 /// If not a git repo, returns empty entries with is_repo: false.
-#[tauri::command]
-pub fn git_status(repo_path: String) -> Result<GitStatusResult, String> {
-    if !git_is_repo(repo_path.clone())? {
+fn git_status_sync(repo_path: String) -> Result<GitStatusResult, String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Ok(GitStatusResult {
             entries: Vec::new(),
             is_repo: false,
@@ -116,10 +131,14 @@ pub fn git_status(repo_path: String) -> Result<GitStatusResult, String> {
     })
 }
 
-/// Stage all changes and commit with the given message.
 #[tauri::command]
-pub fn git_commit(repo_path: String, message: String) -> Result<(), String> {
-    if !git_is_repo(repo_path.clone())? {
+pub async fn git_status(repo_path: String) -> Result<GitStatusResult, String> {
+    run_blocking(move || git_status_sync(repo_path)).await
+}
+
+/// Stage all changes and commit with the given message.
+fn git_commit_sync(repo_path: String, message: String) -> Result<(), String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Err("Not a git repository".to_string());
     }
 
@@ -148,10 +167,14 @@ pub fn git_commit(repo_path: String, message: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Stage specific files. If paths is empty, stage all.
 #[tauri::command]
-pub fn git_add(repo_path: String, paths: Vec<String>) -> Result<(), String> {
-    if !git_is_repo(repo_path.clone())? {
+pub async fn git_commit(repo_path: String, message: String) -> Result<(), String> {
+    run_blocking(move || git_commit_sync(repo_path, message)).await
+}
+
+/// Stage specific files. If paths is empty, stage all.
+fn git_add_sync(repo_path: String, paths: Vec<String>) -> Result<(), String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Err("Not a git repository".to_string());
     }
 
@@ -179,10 +202,14 @@ pub fn git_add(repo_path: String, paths: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-/// Unstage specific files.
 #[tauri::command]
-pub fn git_reset(repo_path: String, paths: Vec<String>) -> Result<(), String> {
-    if !git_is_repo(repo_path.clone())? {
+pub async fn git_add(repo_path: String, paths: Vec<String>) -> Result<(), String> {
+    run_blocking(move || git_add_sync(repo_path, paths)).await
+}
+
+/// Unstage specific files.
+fn git_reset_sync(repo_path: String, paths: Vec<String>) -> Result<(), String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Err("Not a git repository".to_string());
     }
 
@@ -205,10 +232,14 @@ pub fn git_reset(repo_path: String, paths: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-/// Commit only staged changes (no add -A).
 #[tauri::command]
-pub fn git_commit_staged(repo_path: String, message: String) -> Result<(), String> {
-    if !git_is_repo(repo_path.clone())? {
+pub async fn git_reset(repo_path: String, paths: Vec<String>) -> Result<(), String> {
+    run_blocking(move || git_reset_sync(repo_path, paths)).await
+}
+
+/// Commit only staged changes (no add -A).
+fn git_commit_staged_sync(repo_path: String, message: String) -> Result<(), String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Err("Not a git repository".to_string());
     }
 
@@ -236,10 +267,14 @@ pub fn git_commit_staged(repo_path: String, message: String) -> Result<(), Strin
     Ok(())
 }
 
-/// Amend the last commit with the given message or keep the previous message.
 #[tauri::command]
-pub fn git_commit_amend(repo_path: String, message: Option<String>) -> Result<(), String> {
-    if !git_is_repo(repo_path.clone())? {
+pub async fn git_commit_staged(repo_path: String, message: String) -> Result<(), String> {
+    run_blocking(move || git_commit_staged_sync(repo_path, message)).await
+}
+
+/// Amend the last commit with the given message or keep the previous message.
+fn git_commit_amend_sync(repo_path: String, message: Option<String>) -> Result<(), String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Err("Not a git repository".to_string());
     }
 
@@ -265,10 +300,38 @@ pub fn git_commit_amend(repo_path: String, message: Option<String>) -> Result<()
     Ok(())
 }
 
-/// Push to upstream.
 #[tauri::command]
-pub fn git_push(repo_path: String) -> Result<(), String> {
-    if !git_is_repo(repo_path.clone())? {
+pub async fn git_commit_amend(repo_path: String, message: Option<String>) -> Result<(), String> {
+    run_blocking(move || git_commit_amend_sync(repo_path, message)).await
+}
+
+/// Get the current branch name, or None if detached HEAD or not a repo.
+fn git_current_branch_sync(repo_path: String) -> Result<Option<String>, String> {
+    if !git_is_repo_sync(repo_path.clone())? {
+        return Ok(None);
+    }
+
+    let output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if name.is_empty() || name == "HEAD" {
+        Ok(None)
+    } else {
+        Ok(Some(name))
+    }
+}
+
+/// Push to upstream.
+fn git_push_sync(repo_path: String) -> Result<(), String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Err("Not a git repository".to_string());
     }
 
@@ -288,7 +351,7 @@ pub fn git_push(repo_path: String) -> Result<(), String> {
             .map_err(|e| e.to_string())?
     } else {
         // No upstream: push and set upstream in one go.
-        let branch = match git_current_branch(repo_path.clone()) {
+        let branch = match git_current_branch_sync(repo_path.clone()) {
             Ok(Some(b)) if !b.is_empty() => b,
             _ => return Err("Could not determine current branch name.".to_string()),
         };
@@ -307,10 +370,14 @@ pub fn git_push(repo_path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Discard changes: restore modified/deleted, remove untracked.
 #[tauri::command]
-pub fn git_discard(repo_path: String, path: String) -> Result<(), String> {
-    if !git_is_repo(repo_path.clone())? {
+pub async fn git_push(repo_path: String) -> Result<(), String> {
+    run_blocking(move || git_push_sync(repo_path)).await
+}
+
+/// Discard changes: restore modified/deleted, remove untracked.
+fn git_discard_sync(repo_path: String, path: String) -> Result<(), String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Err("Not a git repository".to_string());
     }
 
@@ -346,10 +413,14 @@ pub fn git_discard(repo_path: String, path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Returns true if the current branch has an upstream tracking branch configured.
 #[tauri::command]
-pub fn git_has_upstream(repo_path: String) -> Result<bool, String> {
-    if !git_is_repo(repo_path.clone())? {
+pub async fn git_discard(repo_path: String, path: String) -> Result<(), String> {
+    run_blocking(move || git_discard_sync(repo_path, path)).await
+}
+
+/// Returns true if the current branch has an upstream tracking branch configured.
+fn git_has_upstream_sync(repo_path: String) -> Result<bool, String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Ok(false);
     }
 
@@ -366,11 +437,15 @@ pub fn git_has_upstream(repo_path: String) -> Result<bool, String> {
     Ok(!name.is_empty() && name != "HEAD")
 }
 
+#[tauri::command]
+pub async fn git_has_upstream(repo_path: String) -> Result<bool, String> {
+    run_blocking(move || git_has_upstream_sync(repo_path)).await
+}
+
 /// Get the number of commits that are ahead of the upstream tracking branch.
 /// Returns 0 if there is no upstream or if the count cannot be determined.
-#[tauri::command]
-pub fn git_ahead_count(repo_path: String) -> Result<u32, String> {
-    if !git_is_repo(repo_path.clone())? {
+fn git_ahead_count_sync(repo_path: String) -> Result<u32, String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Ok(0);
     }
 
@@ -390,10 +465,14 @@ pub fn git_ahead_count(repo_path: String) -> Result<u32, String> {
     Ok(count)
 }
 
-/// Pull from the configured upstream.
 #[tauri::command]
-pub fn git_pull(repo_path: String) -> Result<(), String> {
-    if !git_is_repo(repo_path.clone())? {
+pub async fn git_ahead_count(repo_path: String) -> Result<u32, String> {
+    run_blocking(move || git_ahead_count_sync(repo_path)).await
+}
+
+/// Pull from the configured upstream.
+fn git_pull_sync(repo_path: String) -> Result<(), String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Err("Not a git repository".to_string());
     }
 
@@ -411,35 +490,19 @@ pub fn git_pull(repo_path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Get the current branch name, or None if detached HEAD or not a repo.
 #[tauri::command]
-pub fn git_current_branch(repo_path: String) -> Result<Option<String>, String> {
-    if !git_is_repo(repo_path.clone())? {
-        return Ok(None);
-    }
+pub async fn git_pull(repo_path: String) -> Result<(), String> {
+    run_blocking(move || git_pull_sync(repo_path)).await
+}
 
-    let output = Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(&repo_path)
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if !output.status.success() {
-        return Ok(None);
-    }
-
-    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if name.is_empty() || name == "HEAD" {
-        Ok(None)
-    } else {
-        Ok(Some(name))
-    }
+#[tauri::command]
+pub async fn git_current_branch(repo_path: String) -> Result<Option<String>, String> {
+    run_blocking(move || git_current_branch_sync(repo_path)).await
 }
 
 /// List local branches.
-#[tauri::command]
-pub fn git_list_branches(repo_path: String) -> Result<Vec<String>, String> {
-    if !git_is_repo(repo_path.clone())? {
+fn git_list_branches_sync(repo_path: String) -> Result<Vec<String>, String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Ok(Vec::new());
     }
 
@@ -468,10 +531,14 @@ pub fn git_list_branches(repo_path: String) -> Result<Vec<String>, String> {
     Ok(branches)
 }
 
-/// Checkout an existing branch.
 #[tauri::command]
-pub fn git_checkout_branch(repo_path: String, branch: String) -> Result<(), String> {
-    if !git_is_repo(repo_path.clone())? {
+pub async fn git_list_branches(repo_path: String) -> Result<Vec<String>, String> {
+    run_blocking(move || git_list_branches_sync(repo_path)).await
+}
+
+/// Checkout an existing branch.
+fn git_checkout_branch_sync(repo_path: String, branch: String) -> Result<(), String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Err("Not a git repository".to_string());
     }
 
@@ -489,10 +556,14 @@ pub fn git_checkout_branch(repo_path: String, branch: String) -> Result<(), Stri
     Ok(())
 }
 
-/// Create a new branch and check it out.
 #[tauri::command]
-pub fn git_create_branch(repo_path: String, name: String) -> Result<(), String> {
-    if !git_is_repo(repo_path.clone())? {
+pub async fn git_checkout_branch(repo_path: String, branch: String) -> Result<(), String> {
+    run_blocking(move || git_checkout_branch_sync(repo_path, branch)).await
+}
+
+/// Create a new branch and check it out.
+fn git_create_branch_sync(repo_path: String, name: String) -> Result<(), String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Err("Not a git repository".to_string());
     }
 
@@ -515,6 +586,11 @@ pub fn git_create_branch(repo_path: String, name: String) -> Result<(), String> 
     Ok(())
 }
 
+#[tauri::command]
+pub async fn git_create_branch(repo_path: String, name: String) -> Result<(), String> {
+    run_blocking(move || git_create_branch_sync(repo_path, name)).await
+}
+
 /// Get line ranges of modified/added lines in a file (working tree vs HEAD).
 /// Returns Vec of { startLine, endLine } (1-based, inclusive).
 #[derive(Debug, Clone, Serialize)]
@@ -524,9 +600,10 @@ pub struct GitDiffRange {
     pub end_line: u32,
 }
 
-#[tauri::command]
-pub fn git_diff_file(repo_path: String, file_path: String) -> Result<Vec<GitDiffRange>, String> {
-    if !git_is_repo(repo_path.clone())? {
+/// Get line ranges of modified/added lines in a file (working tree vs HEAD).
+/// Returns Vec of { startLine, endLine } (1-based, inclusive).
+fn git_diff_file_sync(repo_path: String, file_path: String) -> Result<Vec<GitDiffRange>, String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Ok(Vec::new());
     }
 
@@ -592,11 +669,15 @@ pub fn git_diff_file(repo_path: String, file_path: String) -> Result<Vec<GitDiff
     Ok(ranges)
 }
 
+#[tauri::command]
+pub async fn git_diff_file(repo_path: String, file_path: String) -> Result<Vec<GitDiffRange>, String> {
+    run_blocking(move || git_diff_file_sync(repo_path, file_path)).await
+}
+
 /// Get the contents of a file at HEAD (for diff view).
 /// If the file does not exist at HEAD, returns empty string.
-#[tauri::command]
-pub fn git_show_file(repo_path: String, file_path: String) -> Result<String, String> {
-    if !git_is_repo(repo_path.clone())? {
+fn git_show_file_sync(repo_path: String, file_path: String) -> Result<String, String> {
+    if !git_is_repo_sync(repo_path.clone())? {
         return Ok(String::new());
     }
 
@@ -648,10 +729,14 @@ pub fn git_show_file(repo_path: String, file_path: String) -> Result<String, Str
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+#[tauri::command]
+pub async fn git_show_file(repo_path: String, file_path: String) -> Result<String, String> {
+    run_blocking(move || git_show_file_sync(repo_path, file_path)).await
+}
+
 /// Clone a git repository into the given target path.
 /// Returns the cloned path on success.
-#[tauri::command]
-pub fn git_clone(repo_url: String, target_path: String) -> Result<String, String> {
+fn git_clone_sync(repo_url: String, target_path: String) -> Result<String, String> {
     let url = repo_url.trim();
     if url.is_empty() {
         return Err("Repository URL is required".to_string());
@@ -668,4 +753,9 @@ pub fn git_clone(repo_url: String, target_path: String) -> Result<String, String
     }
 
     Ok(target_path)
+}
+
+#[tauri::command]
+pub async fn git_clone(repo_url: String, target_path: String) -> Result<String, String> {
+    run_blocking(move || git_clone_sync(repo_url, target_path)).await
 }

@@ -347,6 +347,8 @@ interface LeftSidebarProps {
   onDeletePaths?: (paths: string[]) => void
   /** Increment to refresh the file tree (e.g. after chat creates a file in the app). */
   refreshTrigger?: number
+  /** Called after Pull or branch switch so open files can be reloaded from disk. */
+  onPullOrBranchChange?: () => void
 }
 
 interface TreeNode {
@@ -367,6 +369,7 @@ export function LeftSidebar({
   onOpenFile,
   onDeletePaths,
   refreshTrigger,
+  onPullOrBranchChange,
 }: LeftSidebarProps) {
   const [tree, setTree] = useState<TreeNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -885,6 +888,7 @@ export function LeftSidebar({
               repoPath={activeApp?.rootPath ?? null}
               embedded
               refreshTrigger={refreshTrigger}
+              onPullOrBranchChange={onPullOrBranchChange}
               onOpenFileFromGit={(relativePath) => {
                 if (!activeApp?.rootPath || !onOpenFile) return
                 const fullPath = `${activeApp.rootPath}/${relativePath}`.replace(/\\/g, '/')

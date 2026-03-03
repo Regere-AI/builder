@@ -36,6 +36,8 @@ interface GitPanelProps {
   embedded?: boolean
   /** Increment to trigger status refresh (e.g. when files change). */
   refreshTrigger?: number
+  /** Called after Pull succeeds so open files can be reloaded from disk. */
+  onPullOrBranchChange?: () => void
   /** Open a file in the main editor when clicked in the Git panel. */
   onOpenFileFromGit?: (path: string) => void
 }
@@ -77,6 +79,7 @@ export function GitPanel({
   repoPath,
   embedded,
   refreshTrigger,
+  onPullOrBranchChange,
   onOpenFileFromGit,
 }: GitPanelProps) {
   const [entries, setEntries] = useState<GitStatusEntry[]>([])
@@ -302,6 +305,7 @@ export function GitPanel({
                       try {
                         await gitPull(repoPath)
                         await fetchStatus({ silent: true })
+                        onPullOrBranchChange?.()
                       } catch (e) {
                         setError(e instanceof Error ? e.message : String(e))
                       } finally {
