@@ -3,7 +3,7 @@ import { X, MessageSquare, Send, GripVertical, FileCode } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Select } from '../ui/select'
 import { cn } from '@/lib/utils'
-import { chat, getAgentResponseText, isTauri, appWriteTextFile, appCreateDir } from '@/desktop'
+import { chat, getAgentResponseText, isTauri, appWriteTextFile, appCreateDir, saveFile } from '@/desktop'
 import { getBuilderSettings, setBuilderSettings, type BuilderModelId } from '@/services/api'
 import type { EditorSelectionPayload } from './EditorView'
 import { useChat } from '@ai-sdk/react'
@@ -28,7 +28,7 @@ interface Message {
 
 export interface AgentResponsePayload {
   type: 'code'
-  content: { code: string; filePath?: string }
+  content: { code: string; filePath?: string; /** Full path where file was written (Tauri); dashboard uses this when activeApp is null. */ resolvedPath?: string }
 }
 
 const GENERATED_RELATIVE_PATH = 'uiConfigs/generated.json'
@@ -272,10 +272,12 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
     }
   }, [isResizing, onWidthChange])
 
-  // Stream last assistant message into uiConfigs/generated.json using json-render SpecStream (see https://json-render.dev/docs/streaming)
+  // When streaming finishes, write last assistant message to uiConfigs/generated.json (local file so user can edit).
   useEffect(() => {
     const last = aiMessages[aiMessages.length - 1]
     if (!last || last.role !== 'assistant') return
+    // Only write when stream is done so we have complete JSON
+    if (aiStatus === 'streaming' || aiStatus === 'submitted') return
 
     const text = getTextFromParts(last.parts ?? [])
     if (!text.trim() && !last.parts?.length) return
@@ -330,21 +332,60 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
       }
     }
 
-    // Only write and notify when we have a valid spec from @json-render (so the UI can render the tree)
-    if (code && appRootPath && isTauri()) {
-      const fullPath = pathJoin(appRootPath, GENERATED_RELATIVE_PATH)
-      const dirPath = pathJoin(appRootPath, 'uiConfigs')
-      void appCreateDir(dirPath, true)
-        .then(() => appWriteTextFile(fullPath, code!))
-        .catch((e) => console.error('Failed to write generated.json:', e))
+    // 3) Lenient: if stream looks like JSONL, compile and use so we always write when there's JSON
+    if (!code && text.trim()) {
+      try {
+        const spec = compileSpecStream<Record<string, unknown>>(text)
+        if (spec && typeof spec === 'object') code = JSON.stringify(spec, null, 2)
+      } catch {
+        // ignore
+      }
     }
-    if (code) {
+
+    if (!code) return
+
+    const notifyAndOpen = (resolvedPath?: string) => {
       onAgentResponse?.({
         type: 'code',
-        content: { code, filePath: GENERATED_RELATIVE_PATH },
+        content: { code, filePath: GENERATED_RELATIVE_PATH, ...(resolvedPath && { resolvedPath }) },
       })
     }
-  }, [aiMessages, onAgentResponse, appRootPath])
+
+    if (isTauri()) {
+      const doWrite = async () => {
+        if (appRootPath) {
+          const fullPath = pathJoin(appRootPath, GENERATED_RELATIVE_PATH)
+          const dirPath = pathJoin(appRootPath, 'uiConfigs')
+          await appCreateDir(dirPath, true)
+          await appWriteTextFile(fullPath, code!)
+          notifyAndOpen(fullPath)
+        } else {
+          // No app folder open: use Save dialog so user picks their local directory (e.g. project folder)
+          const result = await saveFile(code!, 'generated.json')
+          if (result?.success && result.filePath) {
+            notifyAndOpen(result.filePath)
+          } else {
+            // User canceled or error: still open in editor so they can copy/save later
+            notifyAndOpen()
+          }
+        }
+      }
+      void doWrite().catch((e) => {
+        console.error('Failed to write generated.json:', e)
+        notifyAndOpen()
+      })
+    } else {
+      // Web: trigger download so user gets the file locally
+      const blob = new Blob([code], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'generated.json'
+      a.click()
+      URL.revokeObjectURL(url)
+      notifyAndOpen()
+    }
+  }, [aiMessages, aiStatus, onAgentResponse, appRootPath])
 
   const handleSend = async () => {
     const hasInput = inputValue.trim().length > 0
@@ -385,10 +426,32 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
             : '')
         if (codeForPreview) {
           const isJson = codeForPreview.trimStart().startsWith('{') || codeForPreview.trimStart().startsWith('[')
-          onAgentResponse?.({
-            type: 'code',
-            content: { code: codeForPreview, filePath: isJson ? 'uiConfigs/generated.json' : 'uiConfigs/generated.tsx' },
-          })
+          const filePath = isJson ? GENERATED_RELATIVE_PATH : 'uiConfigs/generated.tsx'
+          if (isJson) {
+            const doWrite = async () => {
+              let resolvedPath: string | undefined
+              if (appRootPath) {
+                const fullPath = pathJoin(appRootPath, GENERATED_RELATIVE_PATH)
+                const dirPath = pathJoin(appRootPath, 'uiConfigs')
+                await appCreateDir(dirPath, true)
+                await appWriteTextFile(fullPath, codeForPreview)
+                resolvedPath = fullPath
+              } else {
+                const result = await saveFile(codeForPreview, 'generated.json')
+                if (result?.success && result.filePath) resolvedPath = result.filePath
+              }
+              onAgentResponse?.({
+                type: 'code',
+                content: { code: codeForPreview, filePath, ...(resolvedPath && { resolvedPath }) },
+              })
+            }
+            void doWrite().catch((e) => {
+              console.error('Failed to write generated.json:', e)
+              onAgentResponse?.({ type: 'code', content: { code: codeForPreview, filePath } })
+            })
+          } else {
+            onAgentResponse?.({ type: 'code', content: { code: codeForPreview, filePath } })
+          }
         }
       } catch (err) {
         console.error('Tauri chat failed:', err)
@@ -482,7 +545,9 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
           <div className="mb-2 rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-sm text-red-400">
             {aiError.message.includes('fetch') || aiError.message === 'Load failed' || aiError.message.includes('Failed to fetch')
               ? 'Chat server not running. Start it with: npm run chat:server (or npm run dev:with-chat to run app and chat server together).'
-              : aiError.message}
+              : aiError.message.includes('500') || aiError.message.toLowerCase().includes('internal server error')
+                ? `Server error: ${aiError.message}. Check the terminal where you run "npm run chat:server" for details. Ensure your API key is set in Builder Settings (gear icon).`
+                : aiError.message}
           </div>
         )}
         <div className="flex flex-col gap-2">

@@ -13,6 +13,15 @@ import { catalog } from '../lib/json-render/catalog'
 
 const PORT = Number(process.env.CHAT_SERVER_PORT) || 3030
 
+function getSystemPrompt(): string {
+  try {
+    return catalog.prompt()
+  } catch (e) {
+    console.error('Catalog prompt failed, using fallback:', e)
+    return 'You are a UI generator. Output JSON only.'
+  }
+}
+
 type BuilderModelId = 'openai' | 'anthropic' | 'google'
 
 const DEFAULT_MODEL_IDS: Record<BuilderModelId, string> = {
@@ -73,6 +82,10 @@ function sendError(res: ServerResponse, status: number, error: string) {
 async function handlePost(req: IncomingMessage, res: ServerResponse): Promise<void> {
   let body = ''
   for await (const chunk of req) body += chunk
+  if (!body?.trim()) {
+    sendError(res, 400, 'Empty request body')
+    return
+  }
   let parsed: ChatRequestBody
   try {
     parsed = JSON.parse(body) as ChatRequestBody
@@ -95,7 +108,7 @@ async function handlePost(req: IncomingMessage, res: ServerResponse): Promise<vo
   }
 
   const systemPrompt =
-    catalog.prompt() +
+    getSystemPrompt() +
     `
 
 Output ONLY SpecStream format: one JSON object per line. Each line must be a single JSON patch (RFC 6902) with "op", "path", and "value". No other text, no markdown, no explanation.
@@ -125,7 +138,9 @@ Paths: /root for the root element id; /elements/<id> for each element. Build the
       return
     }
   } catch (e) {
-    sendError(res, 500, (e as Error).message)
+    const err = e as Error
+    console.error('[chat] Model init failed:', err.message, err.stack)
+    sendError(res, 500, err.message)
     return
   }
 
@@ -137,7 +152,10 @@ Paths: /root for the root element id; /elements/<id> for each element. Build the
     })
     const response = result.toUIMessageStreamResponse()
     const headers = { ...CORS_HEADERS, ...Object.fromEntries(response.headers.entries()) }
-    res.writeHead(response.status, headers)
+    if (response.headers.has('content-type')) {
+      (headers as Record<string, string>)['Content-Type'] = response.headers.get('content-type')!
+    }
+    res.writeHead(response.status ?? 200, headers)
     if (response.body) {
       const nodeStream = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0])
       nodeStream.pipe(res)
@@ -145,7 +163,9 @@ Paths: /root for the root element id; /elements/<id> for each element. Build the
       res.end()
     }
   } catch (e) {
-    sendError(res, 500, (e as Error).message)
+    const err = e as Error
+    console.error('[chat] streamText or pipe failed:', err.message, err.stack)
+    if (!res.headersSent) sendError(res, 500, err.message)
   }
 }
 
@@ -160,7 +180,9 @@ const server = createServer((req, res) => {
   }
   if (req.url === '/api/chat' && req.method === 'POST') {
     handlePost(req, res).catch((e) => {
-      sendError(res, 500, (e as Error).message)
+      const err = e as Error
+      console.error('[chat] handlePost error:', err.message, err.stack)
+      if (!res.headersSent) sendError(res, 500, err.message)
     })
     return
   }

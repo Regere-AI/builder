@@ -562,21 +562,23 @@ export function BuilderDashboard({
     }
   }, [autoSave])
 
-  // Handle agent responses - open files from agent (write to uiConfigs when activeApp is set)
+  // Chat streams JSON → ChatPanel writes to uiConfigs/generated.json (Tauri) and sends { code, filePath, resolvedPath? }.
+  // We open the file in the editor and optionally write (e.g. when ChatPanel already wrote, we still refresh sidebar).
   useEffect(() => {
     if (!agentResponse) return
 
-    // If agent response contains code to create/edit files
     if (agentResponse.type === 'code' && agentResponse.content?.code) {
       const relativePath = agentResponse.content.filePath || 'untitled.ts'
       const pathJoin = (...parts: string[]) =>
         parts.filter(Boolean).join('/').replace(/\\/g, '/')
-      const resolvedPath = activeApp
-        ? pathJoin(activeApp.rootPath, relativePath)
-        : relativePath
+      // Use resolvedPath from ChatPanel when no app open (e.g. default builder-generated folder); else activeApp root
+      const resolvedPath =
+        agentResponse.content.resolvedPath ??
+        (activeApp ? pathJoin(activeApp.rootPath, relativePath) : relativePath)
+      const canWriteToDisk = isTauri() && (agentResponse.content.resolvedPath != null || activeApp != null)
 
       const writeAndOpen = async () => {
-        if (activeApp && isTauri()) {
+        if (canWriteToDisk) {
           try {
             await appWriteTextFile(resolvedPath, agentResponse.content.code)
             onAppFilesChanged?.()
@@ -589,14 +591,14 @@ export function BuilderDashboard({
           path: resolvedPath,
           name: fileName,
           content: agentResponse.content.code,
-          isModified: !activeApp,
+          isModified: !canWriteToDisk,
         }
         const existing = openFilesRef.current.find((f) => f.path === resolvedPath)
         if (existing) {
           const updatedFile: EditorFile = {
             ...existing,
             content: agentResponse.content.code,
-            isModified: !activeApp,
+            isModified: !canWriteToDisk,
           }
           setOpenFiles((prev) =>
             prev.map((f) => (f.path === resolvedPath ? updatedFile : f))

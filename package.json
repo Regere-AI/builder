@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "concurrently \"tauri dev\"",
+    "tauri:dev": "concurrently \"tauri dev\" \"npm run chat:server\"",
     "tauri:dev:frontend": "tauri dev",
     "tauri:build": "tauri build",
     "chat:server": "tsx src/server/chat.ts",
