@@ -322,7 +322,7 @@ export function launchpadGet(id: string): (LaunchpadConfig & { password: string 
     : null
 }
 
-/** Login to launchpad (Auth Proxy: POST /login/email-password). Returns sessionToken on success.
+/** Login to launchpad (Auth Proxy: POST /proxy/authrs/login/email-password). Returns sessionToken on success.
  * Uses tenant from launchpad config in the X-Tenant-ID header. */
 export async function launchpadLogin(
   baseUrl: string,
@@ -330,7 +330,7 @@ export async function launchpadLogin(
   email: string,
   password: string
 ): Promise<{ sessionToken: string }> {
-  const url = baseUrl.replace(/\/$/, '') + '/login/email-password'
+  const url = baseUrl.replace(/\/$/, '') + '/proxy/authrs/login/email-password'
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -364,9 +364,9 @@ export async function launchpadHealthCheck(baseUrl: string): Promise<boolean> {
   return res.ok
 }
 
-/** Launchpad session logout (POST /session/logout). Send Authorization: Bearer {sessionToken}. */
+/** Launchpad session logout (POST /proxy/authrs/session/logout). Send Authorization: Bearer {sessionToken}. */
 export async function launchpadLogout(baseUrl: string, sessionToken: string): Promise<void> {
-  const url = baseUrl.replace(/\/$/, '') + '/session/logout'
+  const url = baseUrl.replace(/\/$/, '') + '/proxy/authrs/session/logout'
   await fetch(url, {
     method: 'POST',
     headers: {
