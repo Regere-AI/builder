@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Globe } from 'lucide-react'
+import { Globe, Lock } from 'lucide-react'
 
 export const HTTP_TRIGGER_NODE_TYPE = 'httpTrigger'
 
@@ -7,6 +7,9 @@ export type HttpTriggerNodeData = {
   label?: string
   method?: string
   path?: string
+  authentication?: 'none' | 'bearer'
+  /** Raw request body as JSON string (for POST, PUT, PATCH). */
+  rawBody?: string
 }
 
 /** Default HTTP Trigger node: one connection point only (source on the right) to connect to other nodes. */
@@ -21,8 +24,9 @@ export const defaultHttpTriggerNode: {
 }
 
 export function HttpTriggerNode(props: NodeProps) {
-  const { selected } = props
+  const { selected, id } = props
   const data = (props.data ?? {}) as HttpTriggerNodeData
+  const isProtected = data?.authentication && data.authentication !== 'none'
   return (
     <div
       className={`
@@ -43,6 +47,19 @@ export function HttpTriggerNode(props: NodeProps) {
               {[data?.method, data?.path].filter(Boolean).join(' ')}
             </div>
           )}
+          <div className="mt-1.5 flex items-center gap-1 text-[10px]" title={isProtected ? 'Authentication required' : 'Public endpoint'}>
+            {isProtected ? (
+              <>
+                <Lock className="h-3 w-3 shrink-0 text-amber-400/90" />
+                <span className="text-amber-400/90">Requires auth</span>
+              </>
+            ) : (
+              <span className="text-gray-500">Public API</span>
+            )}
+          </div>
+          <div className="mt-1 truncate font-mono text-[10px] text-gray-600" title={id}>
+            {id}
+          </div>
         </div>
       </div>
       {/* Single connection point: source on the right only (no target – entry node) */}

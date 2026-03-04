@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Server } from 'lucide-react'
+import { Server, Lock } from 'lucide-react'
 
 export const SERVICE_CALL_NODE_TYPE = 'serviceCall'
 
@@ -7,9 +7,16 @@ export type ServiceCallNodeData = {
   label?: string
   serviceName?: string
   operation?: string
+  method?: string
+  path?: string
+  authentication?: 'none' | 'bearer'
+  rawBody?: string
 }
 
-export function ServiceCallNode({ data, selected }: NodeProps<ServiceCallNodeData>) {
+export function ServiceCallNode(props: NodeProps<ServiceCallNodeData>) {
+  const { data, selected, id } = props
+  const nodeData = data ?? {}
+  const isProtected = nodeData?.authentication && nodeData.authentication !== 'none'
   return (
     <div
       className={`
@@ -25,12 +32,25 @@ export function ServiceCallNode({ data, selected }: NodeProps<ServiceCallNodeDat
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-medium text-sm">Service Call</div>
-          {data?.serviceName && (
+          {(nodeData?.method ?? nodeData?.path ?? nodeData?.serviceName) && (
             <div className="truncate text-xs text-gray-400">
-              {data.serviceName}
-              {data?.operation && ` · ${data.operation}`}
+              {[nodeData?.method, nodeData?.path].filter(Boolean).join(' ') ||
+                (nodeData?.serviceName && (nodeData?.operation ? `${nodeData.serviceName} · ${nodeData.operation}` : nodeData.serviceName))}
             </div>
           )}
+          <div className="mt-1.5 flex items-center gap-1 text-[10px]" title={isProtected ? 'Authentication required' : 'Public endpoint'}>
+            {isProtected ? (
+              <>
+                <Lock className="h-3 w-3 shrink-0 text-amber-400/90" />
+                <span className="text-amber-400/90">Requires auth</span>
+              </>
+            ) : (
+              <span className="text-gray-500">Public API</span>
+            )}
+          </div>
+          <div className="mt-1 truncate font-mono text-[10px] text-gray-600" title={id}>
+            {id}
+          </div>
         </div>
       </div>
       <Handle type="target" position={Position.Left} className="!w-3 !h-3 !bg-violet-500 !border-2 !border-[#2d2d2d]" />

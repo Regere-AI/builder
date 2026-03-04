@@ -14,6 +14,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { workflowNodeTypes, SERVICE_CALL_NODE_TYPE, defaultHttpTriggerNode } from './nodes'
 import { AddNodeToolbar } from './AddNodeToolbar'
+import { NodePropertiesPanel } from './NodePropertiesPanel'
 
 export interface WorkflowEditorViewProps {
   /** Raw workflow JSON string from the .workflow.json file */
@@ -90,8 +91,36 @@ export function WorkflowEditorView({ json, onChange }: WorkflowEditorViewProps) 
     setEdges((prev) => addEdge(connection, prev))
   }
 
+  const selectedNode = nodes.find((n) => n.selected) ?? null
+  const previousNodeId = selectedNode
+    ? (edges.find((e) => e.target === selectedNode.id)?.source ?? null)
+    : null
+
+  const handleUpdateNodeData = (nodeId: string, data: Record<string, unknown>) => {
+    setNodes((prev) =>
+      prev.map((n) => (n.id === nodeId ? { ...n, data: { ...(n.data ?? {}), ...data } } : n))
+    )
+  }
+
+  const handleUpdateNodeId = (oldId: string, newId: string) => {
+    const trimmed = newId.trim()
+    if (!trimmed || trimmed === oldId) return
+    if (nodes.some((n) => n.id === trimmed)) return
+    setNodes((prev) =>
+      prev.map((n) => (n.id === oldId ? { ...n, id: trimmed } : n))
+    )
+    setEdges((prev) =>
+      prev.map((e) => ({
+        ...e,
+        source: e.source === oldId ? trimmed : e.source,
+        target: e.target === oldId ? trimmed : e.target,
+      }))
+    )
+  }
+
   return (
-    <div className="workflow-editor-canvas flex-1 w-full h-full min-h-0">
+    <div className="workflow-editor-canvas flex h-full w-full min-h-0">
+      <div className="flex-1 min-w-0">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -107,6 +136,14 @@ export function WorkflowEditorView({ json, onChange }: WorkflowEditorViewProps) 
         <Controls />
         <AddNodeToolbar setNodes={setNodes} />
       </ReactFlow>
+      </div>
+      <NodePropertiesPanel
+        selectedNode={selectedNode}
+        nodeIds={nodes.map((n) => n.id)}
+        previousNodeId={previousNodeId ?? undefined}
+        onUpdateNodeData={handleUpdateNodeData}
+        onUpdateNodeId={handleUpdateNodeId}
+      />
     </div>
   )
 }

@@ -14,7 +14,6 @@ import {
   appMove,
   appDelete,
 } from '@/desktop'
-import type { LaunchpadConfig } from '@/services/api'
 import type { ActiveApp } from './IDELayout'
 import { GitPanel } from './GitPanel'
 
@@ -350,8 +349,6 @@ interface LeftSidebarProps {
   refreshTrigger?: number
   /** Called after Pull or branch switch so open files can be reloaded from disk. */
   onPullOrBranchChange?: () => void
-  /** Current launchpad for workflow URL preview. */
-  selectedLaunchpad?: LaunchpadConfig | null
 }
 
 interface TreeNode {
@@ -373,7 +370,6 @@ export function LeftSidebar({
   onDeletePaths,
   refreshTrigger,
   onPullOrBranchChange,
-  selectedLaunchpad,
 }: LeftSidebarProps) {
   const [tree, setTree] = useState<TreeNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -390,7 +386,7 @@ export function LeftSidebar({
 
   const [createAppUrlPathPrefix, setCreateAppUrlPathPrefix] = useState('')
   const [createFileName, setCreateFileName] = useState('')
-  const [createWorkflowPath, setCreateWorkflowPath] = useState('')
+  const [createWorkflowName, setCreateWorkflowName] = useState('')
   const [createWorkflowDescription, setCreateWorkflowDescription] = useState('')
   const [createWorkflowTriggerType, setCreateWorkflowTriggerType] = useState<'httpTrigger'>('httpTrigger')
   const pendingInputRef = useRef<HTMLInputElement>(null)
@@ -483,7 +479,7 @@ export function LeftSidebar({
     setCreateAppName('')
     setCreateAppUrlPathPrefix('')
     setCreateFileName('')
-    setCreateWorkflowPath('')
+    setCreateWorkflowName('')
     setCreateWorkflowDescription('')
     setCreateWorkflowTriggerType('httpTrigger')
     setShowCreateFileDialog(true)
@@ -538,19 +534,11 @@ export function LeftSidebar({
     setCreateAppName('')
     setCreateAppUrlPathPrefix('')
     setCreateFileName('')
-    setCreateWorkflowPath('')
+    setCreateWorkflowName('')
     setCreateWorkflowDescription('')
     setCreateWorkflowTriggerType('httpTrigger')
     setError(null)
   }, [])
-
-  const prevCreateFileKindRef = useRef<'app' | 'ui' | 'workflow' | null>(null)
-  useEffect(() => {
-    if (createFileKind === 'workflow' && prevCreateFileKindRef.current !== 'workflow') {
-      setCreateWorkflowPath(crypto.randomUUID())
-    }
-    prevCreateFileKindRef.current = createFileKind
-  }, [createFileKind])
 
   const getCreateParentPath = useCallback(() => {
     return createParentPathOverride ?? getCreateTargetParentPath()
@@ -605,19 +593,18 @@ export function LeftSidebar({
 
   const submitCreateWorkflow = useCallback(async () => {
     if (!activeApp) return
-    const path = createWorkflowPath.trim().toLowerCase()
-    if (!path) return
+    const name = createWorkflowName.trim()
+    if (!name) return
     setError(null)
-    const pathSegment = path.replace(/\/+/g, '/').replace(/^\//, '').split('/')[0] || path
-    const fileName = pathSegment.endsWith('.workflow.json') ? pathSegment : `${pathSegment}.workflow.json`
+    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '') || 'workflow'
+    const fileName = slug.endsWith('.workflow.json') ? slug : `${slug}.workflow.json`
     const fullPath = pathJoin(getCreateParentPath(), fileName)
     const description = createWorkflowDescription.trim() || undefined
     const baseWorkflow = {
       triggerType: createWorkflowTriggerType,
-      path,
+      id: slug,
+      name,
       description,
-      id: pathSegment,
-      name: description || pathSegment,
       version: '1.0.0',
     }
     const nodes =
@@ -629,8 +616,7 @@ export function LeftSidebar({
               type: 'httpTrigger',
               data: {
                 method: 'POST',
-                path,
-                label: description,
+                label: description ?? name,
               },
               sourcePosition: 'right' as const,
             },
@@ -649,7 +635,7 @@ export function LeftSidebar({
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [activeApp, createWorkflowPath, createWorkflowDescription, createWorkflowTriggerType, getCreateParentPath, loadTree, onOpenFile, closeCreateFileDialog])
+  }, [activeApp, createWorkflowName, createWorkflowDescription, createWorkflowTriggerType, getCreateParentPath, loadTree, onOpenFile, closeCreateFileDialog])
 
   const handlePendingKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -1109,20 +1095,17 @@ export function LeftSidebar({
                         <option key={t.value} value={t.value}>{t.label}</option>
                       ))}
                     </select>
-                    <p className="mt-1 text-xs text-gray-500">
-                      {createWorkflowTriggerType === 'httpTrigger' && 'Configure the HTTP endpoint below.'}
-                    </p>
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Path</label>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Name</label>
                     <input
                       type="text"
-                      value={createWorkflowPath}
-                      onChange={(e) => setCreateWorkflowPath(e.target.value.toLowerCase())}
-                      placeholder="e.g. UUID or custom path"
+                      value={createWorkflowName}
+                      onChange={(e) => setCreateWorkflowName(e.target.value)}
+                      placeholder="e.g. My Workflow"
                       className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-500 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20"
                     />
-                    <p className="mt-1 text-xs text-gray-500">Auto-generated UUID by default; you can overwrite with a custom path.</p>
+                    <p className="mt-1 text-xs text-gray-500">File will be saved as name.workflow.json (slug from name).</p>
                   </div>
                   <div>
                     <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Description</label>
@@ -1133,14 +1116,6 @@ export function LeftSidebar({
                       rows={3}
                       className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-500 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 resize-y min-h-[72px]"
                     />
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">URL</label>
-                    <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-gray-300 font-mono break-all">
-                      {selectedLaunchpad?.url
-                        ? `${selectedLaunchpad.url.replace(/\/$/, '')}/workflow/${createWorkflowPath || '(path)'}`
-                        : `\${launchpad_url}/workflow/${createWorkflowPath || '(path)'}`}
-                    </div>
                   </div>
                   <div className="flex gap-2 pt-1">
                     <button
@@ -1153,7 +1128,7 @@ export function LeftSidebar({
                     <button
                       type="button"
                       onClick={() => submitCreateWorkflow()}
-                      disabled={!createWorkflowPath.trim()}
+                      disabled={!createWorkflowName.trim()}
                       className="ml-auto rounded-lg bg-emerald-500/90 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Save

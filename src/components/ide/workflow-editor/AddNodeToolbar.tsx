@@ -5,8 +5,10 @@ import type { Node } from '@xyflow/react'
 import { AddNodeDialog, type NodeTypeId } from './AddNodeDialog'
 import {
   HTTP_TRIGGER_NODE_TYPE,
+  HTTP_REQUEST_NODE_TYPE,
   SERVICE_CALL_NODE_TYPE,
   defaultHttpTriggerNode,
+  defaultHttpRequestNodeData,
 } from './nodes'
 
 interface AddNodeToolbarProps {
@@ -33,6 +35,14 @@ export function AddNodeToolbar({ setNodes }: AddNodeToolbarProps) {
         type: HTTP_TRIGGER_NODE_TYPE,
         data: defaultHttpTriggerNode.data,
         sourcePosition: defaultHttpTriggerNode.sourcePosition,
+      }
+      setNodes((prev) => [...prev, newNode])
+    } else if (typeId === HTTP_REQUEST_NODE_TYPE) {
+      const newNode: Node = {
+        id: generateNodeId('http-request'),
+        position,
+        type: HTTP_REQUEST_NODE_TYPE,
+        data: defaultHttpRequestNodeData,
       }
       setNodes((prev) => [...prev, newNode])
     } else if (typeId === SERVICE_CALL_NODE_TYPE) {

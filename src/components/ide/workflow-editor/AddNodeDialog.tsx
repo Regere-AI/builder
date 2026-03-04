@@ -1,8 +1,8 @@
 import { createPortal } from 'react-dom'
-import { Globe, Server, Sparkles, X } from 'lucide-react'
-import { HTTP_TRIGGER_NODE_TYPE, SERVICE_CALL_NODE_TYPE } from './nodes'
+import { Globe, Send, Server, Sparkles, X } from 'lucide-react'
+import { HTTP_TRIGGER_NODE_TYPE, HTTP_REQUEST_NODE_TYPE, SERVICE_CALL_NODE_TYPE } from './nodes'
 
-export type NodeTypeId = typeof HTTP_TRIGGER_NODE_TYPE | typeof SERVICE_CALL_NODE_TYPE
+export type NodeTypeId = typeof HTTP_TRIGGER_NODE_TYPE | typeof HTTP_REQUEST_NODE_TYPE | typeof SERVICE_CALL_NODE_TYPE
 
 export const ADDABLE_NODE_TYPES: {
   id: NodeTypeId
@@ -19,6 +19,14 @@ export const ADDABLE_NODE_TYPES: {
     icon: Globe,
     accent: 'emerald',
     iconBg: 'bg-emerald-500/20 text-emerald-400',
+  },
+  {
+    id: HTTP_REQUEST_NODE_TYPE,
+    label: 'HTTP Request',
+    description: 'Make an outbound HTTP request to an API or service',
+    icon: Send,
+    accent: 'sky',
+    iconBg: 'bg-sky-500/20 text-sky-400',
   },
   {
     id: SERVICE_CALL_NODE_TYPE,
