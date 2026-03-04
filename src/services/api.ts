@@ -322,6 +322,88 @@ export function launchpadGet(id: string): (LaunchpadConfig & { password: string 
     : null
 }
 
+/** Login to launchpad (Auth Proxy: POST /proxy/authrs/login/email-password). Returns sessionToken on success.
+ * Uses tenant from launchpad config in the X-Tenant-ID header. */
+export async function launchpadLogin(
+  baseUrl: string,
+  tenant: string,
+  email: string,
+  password: string
+): Promise<{ sessionToken: string }> {
+  const url = baseUrl.replace(/\/$/, '') + '/proxy/authrs/login/email-password'
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'X-Tenant-ID': tenant, // tenant from launchpad config
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email, password }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    let message = `Login failed (${res.status})`
+    try {
+      const json = JSON.parse(text) as { message?: string; error?: string }
+      message = json.message ?? json.error ?? message
+    } catch {
+      if (text) message = text.slice(0, 200)
+    }
+    throw new Error(message)
+  }
+  const data = (await res.json()) as { sessionToken?: string }
+  if (!data.sessionToken) {
+    throw new Error('Login succeeded but no session token returned')
+  }
+  return { sessionToken: data.sessionToken }
+}
+
+/** Launchpad health check (GET /health - Architect SDK health check). Returns true if healthy. */
+export async function launchpadHealthCheck(baseUrl: string): Promise<boolean> {
+  const url = baseUrl.replace(/\/$/, '') + '/health'
+  const res = await fetch(url, { method: 'GET' })
+  return res.ok
+}
+
+/** Launchpad session logout (POST /proxy/authrs/session/logout). Send Authorization: Bearer {sessionToken}. */
+export async function launchpadLogout(baseUrl: string, sessionToken: string): Promise<void> {
+  const url = baseUrl.replace(/\/$/, '') + '/proxy/authrs/session/logout'
+  await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+    },
+  })
+  // Best-effort: don't throw on non-ok so switch still proceeds
+}
+
+const LAUNCHPAD_SESSION_STORAGE_KEY = 'builder_launchpad_session'
+
+export interface LaunchpadSession {
+  launchpadId: string
+  url: string
+  token: string
+}
+
+export function setLaunchpadSession(session: LaunchpadSession): void {
+  localStorage.setItem(LAUNCHPAD_SESSION_STORAGE_KEY, JSON.stringify(session))
+}
+
+export function getLaunchpadSession(): LaunchpadSession | null {
+  try {
+    const raw = localStorage.getItem(LAUNCHPAD_SESSION_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as LaunchpadSession
+    if (!parsed?.launchpadId || !parsed?.url || !parsed?.token) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export function clearLaunchpadSession(): void {
+  localStorage.removeItem(LAUNCHPAD_SESSION_STORAGE_KEY)
+}
+
 // ----- Builder settings (API keys, stored in localStorage like launchpad) -----
 
 const BUILDER_SETTINGS_STORAGE_KEY = 'builder_settings'
@@ -358,4 +440,13 @@ export function getBuilderSettings(): BuilderSettings {
 export function setBuilderSettings(updates: Partial<BuilderSettings>): void {
   const current = getBuilderSettingsStored()
   setBuilderSettingsStored({ ...current, ...updates })
+}
+
+/** Clear all localStorage except builder settings (API keys, etc.). Call on builder logout. */
+export function clearLocalStorageExceptBuilderSettings(): void {
+  const preserved = localStorage.getItem(BUILDER_SETTINGS_STORAGE_KEY)
+  localStorage.clear()
+  if (preserved !== null) {
+    localStorage.setItem(BUILDER_SETTINGS_STORAGE_KEY, preserved)
+  }
 }

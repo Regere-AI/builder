@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Rocket, Plus, X, Mail, Check, Globe, Pencil, Trash2, Search, FolderOpen, GitBranch } from 'lucide-react'
+import { Rocket, Plus, X, Mail, Check, Globe, Pencil, Trash2, Search, FolderOpen, GitBranch, LogOut } from 'lucide-react'
 import { Button } from '../ui/button'
 import {
   launchpadList,
@@ -7,6 +7,8 @@ import {
   launchpadUpdate,
   launchpadDelete,
   launchpadGet,
+  launchpadLogin,
+  setLaunchpadSession,
   type LaunchpadConfig,
   type LaunchpadEnvironment,
 } from '@/services/api'
@@ -55,11 +57,12 @@ function getRepoFolderName(url: string): string | null {
 interface LaunchpadSelectPageProps {
   user: { firstName: string; lastName: string; email: string }
   onGetIn: (selectedLaunchpad: LaunchpadConfig | null) => void
+  onLogout: () => void
 }
 
 const initialForm = { url: '', email: '', password: '', color: DEFAULT_COLOR, environment: 'dev' as LaunchpadEnvironment, customerName: '', tenant: '', configFolderPath: '' }
 
-export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps) {
+export function LaunchpadSelectPage({ user, onGetIn, onLogout }: LaunchpadSelectPageProps) {
   const [launchpads, setLaunchpads] = useState<LaunchpadConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -74,6 +77,10 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
   const [cloneParentPath, setCloneParentPath] = useState<string | null>(null)
   const [cloneLoading, setCloneLoading] = useState(false)
   const [cloneError, setCloneError] = useState<string | null>(null)
+  const [connectDialogConfig, setConnectDialogConfig] = useState<LaunchpadConfig | null>(null)
+  const [connectPassword, setConnectPassword] = useState('')
+  const [connectError, setConnectError] = useState<string | null>(null)
+  const [connectLoading, setConnectLoading] = useState(false)
 
   const filteredLaunchpads = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -104,9 +111,54 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
       .finally(() => setLoading(false))
   }, [])
 
-  const handleConnect = (config: LaunchpadConfig) => {
+  const openConnectDialog = (config: LaunchpadConfig) => {
+    setConnectDialogConfig(config)
+    setConnectPassword('')
+    setConnectError(null)
+    setConnectLoading(false)
+  }
+
+  const closeConnectDialog = () => {
+    setConnectDialogConfig(null)
+    setConnectPassword('')
+    setConnectError(null)
+    setConnectLoading(false)
+  }
+
+  const handleConnectSubmit = async () => {
+    const config = connectDialogConfig
+    if (!config) return
+    const password = connectPassword.trim()
+    if (!password) {
+      setConnectError('Password is required')
+      return
+    }
     const full = launchpadGet(config.id)
-    onGetIn(full ?? config)
+    if (!full?.configFolderPath?.trim()) {
+      setConnectError('Launchpad config folder path is not set')
+      return
+    }
+    const tenantId = config.tenant?.trim()
+    if (!tenantId) {
+      setConnectError('Launchpad tenant is not set')
+      return
+    }
+    setConnectLoading(true)
+    setConnectError(null)
+    try {
+      const { sessionToken } = await launchpadLogin(config.url, tenantId, config.email, password)
+      setLaunchpadSession({ launchpadId: full.id, url: full.url, token: sessionToken })
+      closeConnectDialog()
+      onGetIn(full)
+    } catch (e) {
+      setConnectError(e instanceof Error ? e.message : 'Login failed')
+    } finally {
+      setConnectLoading(false)
+    }
+  }
+
+  const handleConnect = (config: LaunchpadConfig) => {
+    openConnectDialog(config)
   }
 
   const openDialog = () => {
@@ -263,7 +315,18 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
 
   return (
     <div className="min-h-screen bg-[#1e1e1e] flex flex-col items-center p-6 overflow-auto">
-      <div className="w-full max-w-4xl">
+      <div className="w-full max-w-4xl flex flex-col">
+        <div className="flex justify-end mb-4 shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onLogout}
+            className="border-[#4e4e4e] bg-[#2d2d2d] text-gray-300 hover:bg-[#3e3e3e] hover:text-white hover:border-[#5e5e5e]"
+          >
+            <LogOut className="w-3.5 h-3.5 mr-1.5" />
+            Logout
+          </Button>
+        </div>
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-[#007acc] to-[#005a9e] shadow-lg shadow-[#007acc]/20 mb-5">
             <Rocket className="w-8 h-8 text-white" />
@@ -675,6 +738,68 @@ export function LaunchpadSelectPage({ user, onGetIn }: LaunchpadSelectPageProps)
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Connect to launchpad (password prompt + login) */}
+      {connectDialogConfig && (
+        <div
+          className="fixed inset-0 z-[55] flex items-center justify-center p-4 bg-black/60"
+          onClick={(e) => e.target === e.currentTarget && closeConnectDialog()}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl border border-[#3e3e3e] bg-[#2d2d2d] shadow-xl p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-200 mb-1">Connect to launchpad</h3>
+            <p className="text-gray-500 text-sm mb-4">
+              Enter your password to sign in to {connectDialogConfig.customerName || getHostLabel(connectDialogConfig.url)}.
+            </p>
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Email</label>
+                <input
+                  type="text"
+                  value={connectDialogConfig.email}
+                  readOnly
+                  className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-400 cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Password</label>
+                <input
+                  type="password"
+                  value={connectPassword}
+                  onChange={(e) => setConnectPassword(e.target.value)}
+                  placeholder="Enter password"
+                  className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                  onKeyDown={(e) => e.key === 'Enter' && handleConnectSubmit()}
+                  autoFocus
+                />
+              </div>
+            </div>
+            {connectError && (
+              <p className="text-sm text-red-400 mb-4">{connectError}</p>
+            )}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={closeConnectDialog}
+                className="flex-1 border-gray-500 bg-[#3e3e3e]/60 text-gray-100 hover:bg-[#4e4e4e] hover:text-white hover:border-gray-400"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleConnectSubmit}
+                disabled={connectLoading}
+                className="flex-1 bg-[#007acc] text-white hover:bg-[#0098e6]"
+              >
+                {connectLoading ? 'Signing in…' : 'Connect'}
+              </Button>
+            </div>
           </div>
         </div>
       )}
