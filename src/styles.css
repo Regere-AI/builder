@@ -144,4 +144,73 @@
   .custom-scrollbar::-webkit-scrollbar-button {
     display: none;
   }
+
+  /* Subtle sidebar scrollbar - thin, dark, minimal (like VS Code) */
+  .sidebar-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #424242 #252526;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-thumb {
+    background: #424242;
+    border-radius: 3px;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #4e4e4e;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-thumb:active {
+    background: #5e5e5e;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-button {
+    display: none;
+  }
+
+  /* Tree (react-arborist) scrollbar - targets internal scroll container */
+  .sidebar-tree-container > div {
+    scrollbar-width: thin;
+    scrollbar-color: #424242 #252526;
+  }
+  .sidebar-tree-container > div::-webkit-scrollbar {
+    width: 6px;
+  }
+  .sidebar-tree-container > div::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .sidebar-tree-container > div::-webkit-scrollbar-thumb {
+    background: #424242;
+    border-radius: 3px;
+  }
+  .sidebar-tree-container > div::-webkit-scrollbar-thumb:hover {
+    background: #4e4e4e;
+  }
+  .sidebar-tree-container > div::-webkit-scrollbar-thumb:active {
+    background: #5e5e5e;
+  }
+  .sidebar-tree-container > div::-webkit-scrollbar-button {
+    display: none;
+  }
+}
+
+/* Monaco editor: modified line gutter + inline highlight (VS Code-style) */
+.monaco-editor .modified-line-gutter {
+  background: #0e639c !important;
+  width: 3px !important;
+  margin-left: 2px !important;
+}
+.monaco-editor .modified-line-overview {
+  background: #0e639c !important;
+}
+.monaco-editor .modified-line-inline {
+  background-color: rgba(14, 99, 156, 0.25) !important;
 }

@@ -22,15 +22,22 @@ export interface EditorSelectionPayload {
 
 export type GetEditorSelection = () => EditorSelectionPayload | null
 
+export interface DiffRange {
+  startLine: number
+  endLine: number
+}
+
 interface EditorViewProps {
   file: File
+  /** Line ranges of modified/added lines (from git diff) - shows gutter markers. */
+  diffRanges?: DiffRange[]
   onChange?: (value: string) => void
   onSave?: () => void
   /** Called when editor mounts/unmounts so parent can get current selection (Monaco API). */
   onRegisterGetSelection?: (getSelection: GetEditorSelection) => void
 }
 
-export function EditorView({ file, onChange, onSave, onRegisterGetSelection }: EditorViewProps) {
+export function EditorView({ file, diffRanges = [], onChange, onSave, onRegisterGetSelection }: EditorViewProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const filePathRef = useRef(file.path)
   filePathRef.current = file.path
@@ -54,6 +61,52 @@ export function EditorView({ file, onChange, onSave, onRegisterGetSelection }: E
       window.removeEventListener('keydown', handleSave)
     }
   }, [onSave])
+
+  const decorationIdsRef = useRef<string[]>([])
+
+  // Apply diff decorations when editor model and diffRanges are ready
+  useEffect(() => {
+    const ed = editorRef.current
+    if (!ed) return
+    const model = ed.getModel()
+    if (!model) return
+
+    // Clear previous decorations
+    if (decorationIdsRef.current.length > 0) {
+      ed.deltaDecorations(decorationIdsRef.current, [])
+      decorationIdsRef.current = []
+    }
+
+    if (diffRanges.length === 0) return
+
+    const decorations: monaco.editor.IModelDeltaDecoration[] = diffRanges.map((range) => ({
+      range: {
+        startLineNumber: range.startLine,
+        startColumn: 1,
+        endLineNumber: range.endLine,
+        endColumn: model.getLineMaxColumn(range.endLine),
+      },
+      options: {
+        isWholeLine: true,
+        // Left gutter marker (VS Code–style)
+        glyphMarginClassName: 'modified-line-gutter',
+        // Inline background highlight so changes are obvious in the working tree view
+        className: 'modified-line-inline',
+        overviewRuler: {
+          color: 'rgba(14, 99, 156, 0.8)',
+          position: monaco.editor.OverviewRulerLane.Left,
+        },
+      },
+    }))
+
+    decorationIdsRef.current = ed.deltaDecorations([], decorations)
+    return () => {
+      if (ed && decorationIdsRef.current.length > 0) {
+        ed.deltaDecorations(decorationIdsRef.current, [])
+        decorationIdsRef.current = []
+      }
+    }
+  }, [file.path, diffRanges])
 
   const handleEditorDidMount = (editor: editor.IStandaloneCodeEditor) => {
     editorRef.current = editor
@@ -135,6 +188,8 @@ export function EditorView({ file, onChange, onSave, onRegisterGetSelection }: E
           cursorSmoothCaretAnimation: 'on',
           readOnly: false,
           contextmenu: true,
+          glyphMargin: true,
+          overviewRulerLanes: 3,
         }}
         loading={<div className="flex items-center justify-center h-full text-gray-400">Loading editor...</div>}
       />

@@ -12,10 +12,19 @@ import { jsonRenderStateStore } from '@/lib/json-render/zustand-store'
 import { parseToSpec, isJsonRenderSpec } from '@/lib/json-render/layout-to-spec'
 
 export const SETTINGS_TAB_PATH = 'builder://settings'
-import { openFile as desktopOpenFile, saveFile as desktopSaveFile, appWriteTextFile, isTauri } from '@/desktop'
+import {
+  openFile as desktopOpenFile,
+  saveFile as desktopSaveFile,
+  appWriteTextFile,
+  appReadTextFile,
+  isTauri,
+  gitDiffFile,
+  gitShowFile,
+} from '@/desktop'
 import type { ActiveApp } from './IDELayout'
 import type { AgentResponsePayload } from './ChatPanel'
 import type { GetEditorSelection, EditorSelectionPayload } from './EditorView'
+import { GitDiffView } from './GitDiffView'
 
 function parseLayoutOrSpec(content: string): ReturnType<typeof parseToSpec> {
   return parseToSpec(content)
@@ -32,13 +41,17 @@ interface BuilderDashboardProps {
   }
   activeProject?: unknown
   activeApp?: ActiveApp | null
-  registerOpenFileFromSidebar?: (handler: (path: string, content: string) => void) => void
+  registerOpenFileFromSidebar?: (handler: (path: string, content: string, options?: { fromGit?: boolean }) => void) => void
   registerFilesDeletedFromSidebar?: (handler: (paths: string[]) => void) => void
   onAppFilesChanged?: () => void
   onAgentResponseProcessed?: () => void
   agentResponse?: AgentResponsePayload
   /** When user adds selection to chat (e.g. Ctrl+L), open panel and set context. */
   onAddSelectionToChat?: (payload: EditorSelectionPayload) => void
+  /** Incremented when files change on disk (notify watcher) so we can refresh git diff. */
+  fileChangeTrigger?: number
+  /** Incremented when Pull or branch switch completes so we reload open files from disk. */
+  reloadOpenFilesTrigger?: number
 }
 
 export function BuilderDashboard({
@@ -51,6 +64,8 @@ export function BuilderDashboard({
   onAgentResponseProcessed,
   agentResponse,
   onAddSelectionToChat,
+  fileChangeTrigger,
+  reloadOpenFilesTrigger,
 }: BuilderDashboardProps) {
   const AUTO_SAVE_KEY = 'builder-auto-save'
   const [openFiles, setOpenFiles] = useState<EditorFile[]>([])
@@ -58,7 +73,8 @@ export function BuilderDashboard({
   const [showPreview, setShowPreview] = useState(false)
   const [autoSave, setAutoSave] = useState(() => {
     try {
-      return localStorage.getItem(AUTO_SAVE_KEY) === 'true'
+      const stored = localStorage.getItem(AUTO_SAVE_KEY)
+      return stored === null ? true : stored === 'true'
     } catch {
       return false
     }
@@ -70,18 +86,111 @@ export function BuilderDashboard({
   const getEditorSelectionRef = useRef<GetEditorSelection>(() => null)
   const onAddSelectionToChatRef = useRef(onAddSelectionToChat)
   onAddSelectionToChatRef.current = onAddSelectionToChat
+  const [diffRanges, setDiffRanges] = useState<{ startLine: number; endLine: number }[]>([])
+
+  // Fetch git diff for modified lines when opening a file (Tauri only)
+  useEffect(() => {
+    if (!activeFile || !activeApp?.rootPath || !isTauri()) {
+      setDiffRanges([])
+      return
+    }
+    let cancelled = false
+    gitDiffFile(activeApp.rootPath, activeFile.path)
+      .then((ranges) => {
+        if (!cancelled) setDiffRanges(ranges)
+      })
+      .catch(() => {
+        if (!cancelled) setDiffRanges([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeFile?.path, activeApp?.rootPath, fileChangeTrigger])
+
+  // When Pull or branch switch completes, reload open files from disk so editor shows latest content.
+  useEffect(() => {
+    if (
+      reloadOpenFilesTrigger == null ||
+      reloadOpenFilesTrigger === 0 ||
+      !activeApp?.rootPath ||
+      !isTauri()
+    ) {
+      return
+    }
+    const root = activeApp.rootPath.replace(/\\/g, '/').toLowerCase()
+    const isUnderRoot = (path: string) => {
+      const normalized = path.replace(/\\/g, '/').toLowerCase()
+      return normalized.startsWith(root) || normalized.startsWith(root + '/')
+    }
+    const filesToReload = openFilesRef.current.filter(
+      (f) =>
+        f.path !== SETTINGS_TAB_PATH &&
+        !f.isModified &&
+        (f.path.includes('/') || f.path.includes('\\')) &&
+        isUnderRoot(f.path)
+    )
+    let cancelled = false
+    const reload = async () => {
+      const updates = new Map<string, string>()
+      for (const file of filesToReload) {
+        if (cancelled) return
+        try {
+          const content = await appReadTextFile(file.path)
+          if (!cancelled) updates.set(file.path, content)
+        } catch {
+          // File may have been deleted or path invalid; skip
+        }
+      }
+      if (cancelled || updates.size === 0) return
+      setOpenFiles((prev) =>
+        prev.map((f) => {
+          const content = updates.get(f.path)
+          return content !== undefined ? { ...f, content } : f
+        })
+      )
+      setActiveFile((prev) => {
+        if (!prev) return prev
+        const content = updates.get(prev.path)
+        return content !== undefined ? { ...prev, content } : prev
+      })
+    }
+    reload()
+    return () => {
+      cancelled = true
+    }
+  }, [reloadOpenFilesTrigger, activeApp?.rootPath])
 
   useEffect(() => {
     if (!registerOpenFileFromSidebar) return
-    const handler = (path: string, content: string) => {
+    const handler = async (path: string, content: string, options?: { fromGit?: boolean }) => {
       if (path == null || typeof path !== 'string') return
-      const existing = openFilesRef.current.find((f) => f.path === path)
+      const source: 'normal' | 'git' = options?.fromGit ? 'git' : 'normal'
+      const existing = openFilesRef.current.find(
+        (f) => f.path === path && (f.source ?? 'normal') === source
+      )
       if (existing) {
         setActiveFile(existing)
         return
       }
-      const name = path.split(/[\\/]/).pop() || path
-      const newFile: EditorFile = { path, name, content, isModified: false }
+      const baseName = path.split(/[\\/]/).pop() || path
+      const displayName = source === 'git' ? `${baseName} (Working Tree)` : baseName
+      let originalContent: string | undefined
+      if (source === 'git' && activeApp?.rootPath && isTauri()) {
+        try {
+          originalContent = await gitShowFile(activeApp.rootPath, path)
+        } catch {
+          originalContent = ''
+        }
+      }
+      const newFile: EditorFile = {
+        path,
+        name: baseName,
+        displayName,
+        source,
+        originalContent,
+        content,
+        isModified: false,
+      }
       setOpenFiles((prev) => [...prev, newFile])
       setActiveFile(newFile)
     }
@@ -148,7 +257,9 @@ export function BuilderDashboard({
       if (result.canceled || !result.success || !result.filePath || !result.content) {
         return
       }
-      const existingFile = openFiles.find((f) => f.path === result.filePath)
+      const existingFile = openFiles.find(
+        (f) => f.path === result.filePath && (f.source ?? 'normal') === 'normal'
+      )
       if (existingFile) {
         setActiveFile(existingFile)
         return
@@ -157,6 +268,8 @@ export function BuilderDashboard({
       const newFile: EditorFile = {
         path: result.filePath,
         name: fileName,
+        displayName: fileName,
+        source: 'normal',
         content: result.content,
         isModified: false,
       }
@@ -177,7 +290,7 @@ export function BuilderDashboard({
     let counter = 1
     
     // Check if untitled.ts exists, if so, try untitled-1.ts, untitled-2.ts, etc.
-    while (openFiles.some((f) => f.path === filePath)) {
+    while (openFiles.some((f) => f.path === filePath && (f.source ?? 'normal') === 'normal')) {
       counter++
       filePath = `Untitled-${counter}`
     }
@@ -186,6 +299,8 @@ export function BuilderDashboard({
     const newFile: EditorFile = {
       path: filePath,
       name: fileName,
+      displayName: fileName,
+      source: 'normal',
       content: '',
       isModified: false,
     }
@@ -195,17 +310,38 @@ export function BuilderDashboard({
   }
 
   const handleFileClose = (file: EditorFile) => {
-    setOpenFiles((prev) => prev.filter((f) => f.path !== file.path))
+    setOpenFiles((prev) =>
+      prev.filter(
+        (f) =>
+          !(
+            f.path === file.path &&
+            (f.source ?? 'normal') === (file.source ?? 'normal') &&
+            f.path !== SETTINGS_TAB_PATH
+          )
+      )
+    )
     
     // If closing active file, switch to another
-    if (activeFile?.path === file.path) {
-      const remaining = openFiles.filter((f) => f.path !== file.path)
+    if (
+      activeFile?.path === file.path &&
+      (activeFile.source ?? 'normal') === (file.source ?? 'normal')
+    ) {
+      const remaining = openFiles.filter(
+        (f) =>
+          !(
+            f.path === file.path &&
+            (f.source ?? 'normal') === (file.source ?? 'normal') &&
+            f.path !== SETTINGS_TAB_PATH
+          )
+      )
       setActiveFile(remaining.length > 0 ? remaining[remaining.length - 1] : null)
     }
   }
 
   const handleOpenBuilderSettings = () => {
-    const existing = openFiles.find((f) => f.path === SETTINGS_TAB_PATH)
+    const existing = openFiles.find(
+      (f) => f.path === SETTINGS_TAB_PATH && (f.source ?? 'normal') === 'normal'
+    )
     if (existing) {
       setActiveFile(existing)
       return
@@ -213,6 +349,8 @@ export function BuilderDashboard({
     const settingsFile: EditorFile = {
       path: SETTINGS_TAB_PATH,
       name: 'Builder Settings',
+      displayName: 'Builder Settings',
+      source: 'normal',
       content: '',
       isModified: false,
     }
@@ -225,7 +363,7 @@ export function BuilderDashboard({
 
     setOpenFiles((prev) =>
       prev.map((f) =>
-        f.path === activeFile.path
+        f.path === activeFile.path && (f.source ?? 'normal') === (activeFile.source ?? 'normal')
           ? { ...f, content: value, isModified: true }
           : f
       )
@@ -234,7 +372,8 @@ export function BuilderDashboard({
       prev ? { ...prev, content: value, isModified: true } : null
     )
 
-    // Auto-save: debounced write to disk when enabled (only for files with a real path)
+    // Auto-save: debounced write to disk when enabled (only for files with a real path).
+    // Do not stage - modified files stay in Unstaged Changes.
     if (autoSave && isTauri() && (activeFile.path.includes('/') || activeFile.path.includes('\\'))) {
       if (autoSaveTimeoutRef.current) clearTimeout(autoSaveTimeoutRef.current)
       pendingAutoSaveRef.current = { path: activeFile.path, content: value }
@@ -253,6 +392,7 @@ export function BuilderDashboard({
           setActiveFile((prev) =>
             prev?.path === pending.path ? { ...prev, isModified: false } : prev
           )
+          onAppFilesChanged?.()
         } catch (e) {
           console.error('Auto-save failed:', e)
         }
@@ -264,26 +404,45 @@ export function BuilderDashboard({
     if (!activeFile) return
     if (activeFile.path === SETTINGS_TAB_PATH) return
     if (!isTauri()) return
-    try {
-      const result = await desktopSaveFile(activeFile.content, activeFile.path)
-      if (result.success && result.filePath) {
-        const updatedPath = result.filePath
-        const updatedName = updatedPath.split(/[\\/]/).pop() || updatedPath
+    const hasRealPath = activeFile.path.includes('/') || activeFile.path.includes('\\')
+    if (hasRealPath) {
+      try {
+        await appWriteTextFile(activeFile.path, activeFile.content)
         setOpenFiles((prev) =>
           prev.map((f) =>
-            f.path === activeFile.path
-              ? { ...f, path: updatedPath, name: updatedName, isModified: false }
-              : f
+            f.path === activeFile.path ? { ...f, isModified: false } : f
           )
         )
         setActiveFile((prev) =>
-          prev
-            ? { ...prev, path: updatedPath, name: updatedName, isModified: false }
-            : null
+          prev?.path === activeFile.path ? { ...prev, isModified: false } : prev
         )
+        onAppFilesChanged?.()
+      } catch (error) {
+        console.error('Failed to save file:', error)
       }
-    } catch (error) {
-      console.error('Failed to save file:', error)
+    } else {
+      try {
+        const result = await desktopSaveFile(activeFile.content)
+        if (result.success && result.filePath) {
+          const updatedPath = result.filePath
+          const updatedName = updatedPath.split(/[\\/]/).pop() || updatedPath
+          setOpenFiles((prev) =>
+            prev.map((f) =>
+              f.path === activeFile.path
+                ? { ...f, path: updatedPath, name: updatedName, isModified: false }
+                : f
+            )
+          )
+          setActiveFile((prev) =>
+            prev
+              ? { ...prev, path: updatedPath, name: updatedName, isModified: false }
+              : null
+          )
+          onAppFilesChanged?.()
+        }
+      } catch (error) {
+        console.error('Failed to save file:', error)
+      }
     }
   }
 
@@ -308,6 +467,7 @@ export function BuilderDashboard({
             ? { ...prev, path: updatedPath, name: updatedName, isModified: false }
             : null
         )
+        onAppFilesChanged?.()
       }
     } catch (error) {
       console.error('Failed to save file:', error)
@@ -729,19 +889,27 @@ export function BuilderDashboard({
             <div className="flex-1 flex items-center justify-center p-8 text-gray-400">
               Invalid layout JSON. Ensure the file has a root object with a <code className="bg-[#3e3e3e] px-1 rounded">type</code> field.
             </div>
+          ) : activeFile.source === 'git' ? (
+            <GitDiffView file={activeFile} />
           ) : isJsonFile ? (
             <JsonSplitView
               file={activeFile}
+              diffRanges={[]}
               onChange={handleFileChange}
               onSave={handleSave}
-              onRegisterGetSelection={(getter) => { getEditorSelectionRef.current = getter }}
+              onRegisterGetSelection={(getter) => {
+                getEditorSelectionRef.current = getter
+              }}
             />
           ) : (
             <EditorView
               file={activeFile}
+              diffRanges={[]}
               onChange={handleFileChange}
               onSave={handleSave}
-              onRegisterGetSelection={(getter) => { getEditorSelectionRef.current = getter }}
+              onRegisterGetSelection={(getter) => {
+                getEditorSelectionRef.current = getter
+              }}
             />
           )
         ) : activeProject ? (
