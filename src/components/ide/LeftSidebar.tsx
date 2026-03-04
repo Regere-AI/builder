@@ -386,7 +386,12 @@ export function LeftSidebar({
 
   const [createAppUrlPathPrefix, setCreateAppUrlPathPrefix] = useState('')
   const [createFileName, setCreateFileName] = useState('')
+  const [createWorkflowName, setCreateWorkflowName] = useState('')
+  const [createWorkflowDescription, setCreateWorkflowDescription] = useState('')
+  const [createWorkflowTriggerType, setCreateWorkflowTriggerType] = useState<'httpTrigger'>('httpTrigger')
   const pendingInputRef = useRef<HTMLInputElement>(null)
+
+  const TRIGGER_TYPES = [{ value: 'httpTrigger' as const, label: 'HTTP trigger' }]
 
   useEffect(() => {
     if (pendingNewItem) {
@@ -474,6 +479,9 @@ export function LeftSidebar({
     setCreateAppName('')
     setCreateAppUrlPathPrefix('')
     setCreateFileName('')
+    setCreateWorkflowName('')
+    setCreateWorkflowDescription('')
+    setCreateWorkflowTriggerType('httpTrigger')
     setShowCreateFileDialog(true)
   }, [])
 
@@ -526,6 +534,9 @@ export function LeftSidebar({
     setCreateAppName('')
     setCreateAppUrlPathPrefix('')
     setCreateFileName('')
+    setCreateWorkflowName('')
+    setCreateWorkflowDescription('')
+    setCreateWorkflowTriggerType('httpTrigger')
     setError(null)
   }, [])
 
@@ -582,20 +593,49 @@ export function LeftSidebar({
 
   const submitCreateWorkflow = useCallback(async () => {
     if (!activeApp) return
-    let name = createFileName.trim().toLowerCase()
+    const name = createWorkflowName.trim()
     if (!name) return
-    if (!name.endsWith('.workflow.json')) name += '.workflow.json'
     setError(null)
-    const fullPath = pathJoin(getCreateParentPath(), name)
+    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-_]/g, '') || 'workflow'
+    const fileName = slug.endsWith('.workflow.json') ? slug : `${slug}.workflow.json`
+    const fullPath = pathJoin(getCreateParentPath(), fileName)
+    const description = createWorkflowDescription.trim() || undefined
+    const baseWorkflow = {
+      triggerType: createWorkflowTriggerType,
+      id: slug,
+      name,
+      description,
+      version: '1.0.0',
+    }
+    const nodes =
+      createWorkflowTriggerType === 'httpTrigger'
+        ? [
+            {
+              id: 'trigger-1',
+              position: { x: 80, y: 100 },
+              type: 'httpTrigger',
+              data: {
+                method: 'POST',
+                label: description ?? name,
+              },
+              sourcePosition: 'right' as const,
+            },
+          ]
+        : []
+    const workflowPayload = {
+      ...baseWorkflow,
+      data: { nodes, edges: [] },
+    }
+    const workflowContent = JSON.stringify(workflowPayload, null, 2)
     try {
-      await appWriteTextFile(fullPath, '{}')
+      await appWriteTextFile(fullPath, workflowContent)
       await loadTree(activeApp.rootPath)
       closeCreateFileDialog()
-      if (onOpenFile) onOpenFile(fullPath, '{}')
+      if (onOpenFile) onOpenFile(fullPath, workflowContent)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [activeApp, createFileName, getCreateParentPath, loadTree, onOpenFile, closeCreateFileDialog])
+  }, [activeApp, createWorkflowName, createWorkflowDescription, createWorkflowTriggerType, getCreateParentPath, loadTree, onOpenFile, closeCreateFileDialog])
 
   const handlePendingKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -1045,13 +1085,36 @@ export function LeftSidebar({
               ) : (
                 <div className="space-y-4">
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">File name</label>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Trigger type</label>
+                    <select
+                      value={createWorkflowTriggerType}
+                      onChange={(e) => setCreateWorkflowTriggerType(e.target.value as 'httpTrigger')}
+                      className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20"
+                    >
+                      {TRIGGER_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Name</label>
                     <input
                       type="text"
-                      value={createFileName}
-                      onChange={(e) => setCreateFileName(e.target.value.toLowerCase())}
-                      placeholder="e.g. onboarding.workflow.json"
+                      value={createWorkflowName}
+                      onChange={(e) => setCreateWorkflowName(e.target.value)}
+                      placeholder="e.g. My Workflow"
                       className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-500 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">File will be saved as name.workflow.json (slug from name).</p>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Description</label>
+                    <textarea
+                      value={createWorkflowDescription}
+                      onChange={(e) => setCreateWorkflowDescription(e.target.value)}
+                      placeholder="Describe what this workflow does..."
+                      rows={3}
+                      className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-500 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 resize-y min-h-[72px]"
                     />
                   </div>
                   <div className="flex gap-2 pt-1">
@@ -1065,9 +1128,10 @@ export function LeftSidebar({
                     <button
                       type="button"
                       onClick={() => submitCreateWorkflow()}
-                      className="ml-auto rounded-lg bg-emerald-500/90 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-400"
+                      disabled={!createWorkflowName.trim()}
+                      className="ml-auto rounded-lg bg-emerald-500/90 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Create
+                      Save
                     </button>
                   </div>
                 </div>

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { LogOut, Rocket, RefreshCw, GitBranch, ChevronDown, Check } from 'lucide-react'
+import { Rocket, RefreshCw, GitBranch, ChevronDown, Check, X } from 'lucide-react'
 import { Button } from '../ui/button'
 import type { LaunchpadConfig } from '@/services/api'
+import { launchpadHealthCheck } from '@/services/api'
 import { gitIsRepo, gitCurrentBranch, gitListBranches, gitCheckoutBranch, gitCreateBranch } from '@/desktop'
 
+const LAUNCHPAD_HEALTH_POLL_MS = 10_000
+
 interface StatusBarProps {
-  onLogout: () => void
   selectedLaunchpad?: LaunchpadConfig | null
   onSwitchLaunchpad: () => void
   repoPath?: string | null
@@ -15,7 +17,6 @@ interface StatusBarProps {
 const DEFAULT_STATUS_BAR_COLOR = '#007acc'
 
 export function StatusBar({
-  onLogout,
   selectedLaunchpad,
   onSwitchLaunchpad,
   repoPath,
@@ -29,7 +30,30 @@ export function StatusBar({
   const [branchModalOpen, setBranchModalOpen] = useState(false)
   const [newBranchName, setNewBranchName] = useState('')
   const [creatingBranch, setCreatingBranch] = useState(false)
+  const [launchpadHealthy, setLaunchpadHealthy] = useState<boolean | null>(null)
   const branchMenuRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!selectedLaunchpad?.url) {
+      setLaunchpadHealthy(null)
+      return
+    }
+    let cancelled = false
+    const check = async () => {
+      try {
+        const ok = await launchpadHealthCheck(selectedLaunchpad!.url)
+        if (!cancelled) setLaunchpadHealthy(ok)
+      } catch {
+        if (!cancelled) setLaunchpadHealthy(false)
+      }
+    }
+    void check()
+    const interval = setInterval(check, LAUNCHPAD_HEALTH_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [selectedLaunchpad?.url])
 
   useEffect(() => {
     let cancelled = false
@@ -151,6 +175,15 @@ export function StatusBar({
       (selectedLaunchpad.tenant ? ` · tenant: ${selectedLaunchpad.tenant}` : '')
     : 'No launchpad'
 
+  const healthTooltip =
+    launchpadHealthy === true
+      ? 'Launchpad healthy'
+      : launchpadHealthy === false
+        ? 'Launchpad unreachable or unhealthy'
+        : selectedLaunchpad?.url
+          ? 'Checking launchpad health…'
+          : ''
+
   const barColor = selectedLaunchpad?.color?.trim() || DEFAULT_STATUS_BAR_COLOR
 
   return (
@@ -230,17 +263,36 @@ export function StatusBar({
           <span>0 info</span>
         </div>
       </div>
-      <div className="flex items-center gap-4">
-        <span className="text-gray-200">Ready</span>
-        <Button
-          onClick={onLogout}
-          variant="ghost"
-          size="sm"
-          className="h-5 px-2 text-xs hover:bg-black/20 text-white"
-        >
-          <LogOut className="w-3 h-3 mr-1" />
-          Logout
-        </Button>
+      <div className="flex items-center gap-4 shrink-0">
+        {selectedLaunchpad?.url ? (
+          <span
+            className="shrink-0"
+            title={healthTooltip}
+          >
+            {launchpadHealthy === true && (
+              <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[11px] font-semibold bg-emerald-600 text-white shadow-sm">
+                <Check className="w-3 h-3 shrink-0" aria-hidden />
+                Healthy
+                <span className="sr-only">Launchpad healthy</span>
+              </span>
+            )}
+            {launchpadHealthy === false && (
+              <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[11px] font-semibold bg-red-600 text-white shadow-sm animate-blink">
+                <X className="w-3 h-3 shrink-0" aria-hidden />
+                Unhealthy
+                <span className="sr-only">Launchpad unreachable or unhealthy</span>
+              </span>
+            )}
+            {launchpadHealthy === null && (
+              <span className="inline-flex items-center gap-1 rounded-full px-1.5 py-px text-[11px] font-semibold bg-gray-600 text-white">
+                <span className="w-3 h-3 rounded-full border-2 border-white/80 border-t-transparent animate-spin shrink-0" aria-hidden />
+                Checking…
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className="text-gray-200">Ready</span>
+        )}
       </div>
 
       {branchModalOpen && repoPath && (

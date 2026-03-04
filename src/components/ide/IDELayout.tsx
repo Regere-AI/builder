@@ -25,11 +25,10 @@ interface IDELayoutProps {
   onOpenApp: (app: ActiveApp | null) => void
   onCloseApp: () => void
   selectedLaunchpad?: LaunchpadConfig | null
-  onLogout: () => void
   onSwitchLaunchpad: () => void
 }
 
-export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp, onCloseApp, selectedLaunchpad, onSwitchLaunchpad }: IDELayoutProps) {
+export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseApp, selectedLaunchpad, onSwitchLaunchpad }: IDELayoutProps) {
   const [sidebarExpanded, setSidebarExpanded] = useState(true)
   const [sidebarView, setSidebarView] = useState<'files' | 'git'>('files')
   const [chatPanelOpen, setChatPanelOpen] = useState(false)
@@ -194,7 +193,6 @@ export function IDELayout({ user, onLogout, activeProject, activeApp, onOpenApp,
 
       {/* Status Bar */}
       <StatusBar
-        onLogout={onLogout}
         selectedLaunchpad={selectedLaunchpad}
         onSwitchLaunchpad={onSwitchLaunchpad}
         repoPath={activeApp?.rootPath ?? null}

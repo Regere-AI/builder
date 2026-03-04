@@ -111,6 +111,20 @@
     }
   }
 
+  @keyframes blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
+  }
+
+  .animate-blink {
+    animation: blink 1s ease-in-out infinite;
+  }
+
   /* Custom scrollbar styling for dark theme */
   .custom-scrollbar {
     scrollbar-width: thin;
@@ -200,6 +214,46 @@
   .sidebar-tree-container > div::-webkit-scrollbar-button {
     display: none;
   }
+}
+
+/* React Flow workflow editor: dark mode visibility for controls, nodes, edges, handles */
+.workflow-editor-canvas .react-flow {
+  --xy-controls-button-background-color-default: #2d2d2d;
+  --xy-controls-button-background-color-hover-default: #3e3e3e;
+  --xy-controls-button-color-default: #e0e0e0;
+  --xy-controls-button-color-hover-default: #fff;
+  --xy-controls-button-border-color-default: #404040;
+  --xy-controls-box-shadow-default: 0 0 2px 1px rgba(0, 0, 0, 0.3);
+  --xy-node-background-color-default: #2d2d2d;
+  --xy-node-border-default: 1px solid #555;
+  --xy-node-color-default: #e0e0e0;
+  --xy-node-boxshadow-hover-default: 0 1px 4px 1px rgba(0, 0, 0, 0.25);
+  --xy-node-boxshadow-selected-default: 0 0 0 1.5px #6b9fff;
+  --xy-handle-background-color-default: #555;
+  --xy-handle-border-color-default: #2d2d2d;
+  --xy-background-pattern-dots-color-default: #404040;
+  --xy-edge-stroke-default: #606060;
+  --xy-edge-stroke-selected-default: #6b9fff;
+  --xy-connectionline-stroke-default: #606060;
+  --xy-selection-background-color-default: rgba(107, 159, 255, 0.15);
+  --xy-selection-border-default: 1px dotted rgba(107, 159, 255, 0.8);
+}
+.workflow-editor-canvas .react-flow__node {
+  background: #2d2d2d !important;
+  color: #e0e0e0 !important;
+  border: 1px solid #555 !important;
+}
+.workflow-editor-canvas .react-flow__controls button {
+  background: #2d2d2d !important;
+  color: #e0e0e0 !important;
+  border-color: #404040 !important;
+}
+.workflow-editor-canvas .react-flow__controls button:hover {
+  background: #3e3e3e !important;
+  color: #fff !important;
+}
+.workflow-editor-canvas .react-flow__controls button svg {
+  fill: currentColor;
 }
 
 /* Monaco editor: modified line gutter + inline highlight (VS Code-style) */

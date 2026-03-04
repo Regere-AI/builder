@@ -8,6 +8,7 @@ import { LaunchpadSelectPage } from './components/ide/LaunchpadSelectPage'
 import { cn } from './lib/utils'
 import { Mail, Lock } from 'lucide-react'
 import type { LaunchpadConfig } from './services/api'
+import { getLaunchpadSession, clearLaunchpadSession, launchpadLogout, clearLocalStorageExceptBuilderSettings } from './services/api'
 import { isTauri } from './desktop'
 
 type View = 'signup' | 'signin' | 'otp' | '2fa' | 'license' | 'launchpad' | 'welcome'
@@ -116,14 +117,27 @@ function App() {
   }
 
   const handleLogout = () => {
-    localStorage.removeItem('authToken')
-    localStorage.removeItem('userData')
+    clearLocalStorageExceptBuilderSettings()
     setUser(null)
     setSelectedLaunchpad(null)
     setActiveApp(null)
     setCurrentView('signin')
     setError(null)
     setActiveTab('signin')
+  }
+
+  const handleSwitchLaunchpad = async () => {
+    const session = getLaunchpadSession()
+    if (session?.url && session?.token) {
+      try {
+        await launchpadLogout(session.url, session.token)
+      } finally {
+        clearLaunchpadSession()
+      }
+    }
+    setSelectedLaunchpad(null)
+    setActiveApp(null)
+    setCurrentView('launchpad')
   }
 
   // Restore session from localStorage on app mount
@@ -172,13 +186,12 @@ function App() {
     )}>
       <div className="w-full">
         {currentView === 'launchpad' && user ? (
-          <LaunchpadSelectPage user={user} onGetIn={handleLaunchpadGetIn} />
+          <LaunchpadSelectPage user={user} onGetIn={handleLaunchpadGetIn} onLogout={handleLogout} />
         ) : currentView === 'welcome' && user ? (
           <IDELayout
             user={user}
-            onLogout={handleLogout}
             selectedLaunchpad={selectedLaunchpad}
-            onSwitchLaunchpad={() => setCurrentView('launchpad')}
+            onSwitchLaunchpad={handleSwitchLaunchpad}
             activeApp={activeApp}
             onOpenApp={setActiveApp}
             onCloseApp={() => setActiveApp(null)}

@@ -24,6 +24,7 @@ import type { ActiveApp } from './IDELayout'
 import type { AgentResponsePayload } from './ChatPanel'
 import type { GetEditorSelection, EditorSelectionPayload } from './EditorView'
 import { GitDiffView } from './GitDiffView'
+import { WorkflowEditorView } from './WorkflowEditorView'
 
 function parseLayoutOrSpec(content: string): ReturnType<typeof parseToSpec> {
   return parseToSpec(content)
@@ -70,6 +71,7 @@ export function BuilderDashboard({
   const [openFiles, setOpenFiles] = useState<EditorFile[]>([])
   const [activeFile, setActiveFile] = useState<EditorFile | null>(null)
   const [showPreview, setShowPreview] = useState(false)
+  const [workflowViewMode, setWorkflowViewMode] = useState<'editor' | 'configuration'>('editor')
   const [autoSave, setAutoSave] = useState(() => {
     try {
       const stored = localStorage.getItem(AUTO_SAVE_KEY)
@@ -169,6 +171,10 @@ export function BuilderDashboard({
       )
       if (existing) {
         setActiveFile(existing)
+        if (path.toLowerCase().endsWith('.workflow.json')) {
+          setShowPreview(false)
+          setWorkflowViewMode('editor')
+        }
         return
       }
       const baseName = path.split(/[\\/]/).pop() || path
@@ -192,6 +198,10 @@ export function BuilderDashboard({
       }
       setOpenFiles((prev) => [...prev, newFile])
       setActiveFile(newFile)
+      if (path.toLowerCase().endsWith('.workflow.json')) {
+        setShowPreview(false)
+        setWorkflowViewMode('editor')
+      }
     }
     registerOpenFileFromSidebar(handler)
     return () => registerOpenFileFromSidebar(() => {})
@@ -281,6 +291,10 @@ export function BuilderDashboard({
 
   const handleFileSelect = (file: EditorFile) => {
     setActiveFile(file)
+    if (file.path?.toLowerCase().endsWith('.workflow.json')) {
+      setShowPreview(false)
+      setWorkflowViewMode('editor')
+    }
   }
 
   const handleNewFile = () => {
@@ -783,7 +797,9 @@ export function BuilderDashboard({
   }, [activeFile?.path])
 
   const isJsonFile = activeFile?.path?.toLowerCase().endsWith('.json')
-  const layoutSpecFromFile = activeFile && isJsonFile ? parseLayoutOrSpec(activeFile.content) : null
+  const isWorkflowFile = activeFile?.path?.toLowerCase().endsWith('.workflow.json')
+  const isLayoutJsonFile = isJsonFile && !isWorkflowFile
+  const layoutSpecFromFile = activeFile && isLayoutJsonFile ? parseLayoutOrSpec(activeFile.content) : null
   // When agent just returned code for generated.json, use that spec so the UI tree renders even before file is focused
   const generatedSpecFromAgent =
     agentResponse?.type === 'code' &&
@@ -802,13 +818,22 @@ export function BuilderDashboard({
   const isGeneratedJson = agentResponse?.content?.filePath === 'uiConfigs/generated.json'
   const showLayoutPreview =
     !!layoutSpec &&
-    (showPreview && isJsonFile ? true : agentResponse?.type === 'code' && !!isGeneratedJson)
+    (showPreview && isLayoutJsonFile ? true : agentResponse?.type === 'code' && !!isGeneratedJson)
 
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
   const configShortcut = isMac ? '⌘1' : 'Ctrl+1'
   const previewShortcut = isMac ? '⌘2' : 'Ctrl+2'
 
-  // Cmd+1 / Ctrl+1 → Configuration, Cmd+2 / Ctrl+2 → Preview (when JSON file is active)
+  // Workflow: show editor by default; ensure preview is off when switching to workflow
+  useEffect(() => {
+    if (activeFile && isWorkflowFile) {
+      setShowPreview(false)
+    }
+  }, [activeFile?.path, isWorkflowFile])
+
+  const editorShortcut = isMac ? '⌘2' : 'Ctrl+2'
+
+  // Cmd+1 / Ctrl+1 → Configuration, Cmd+2 / Ctrl+2 → Editor (workflow) or Preview (layout JSON)
   useEffect(() => {
     if (!activeFile || !isJsonFile) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -816,15 +841,17 @@ export function BuilderDashboard({
       if (!mod || e.altKey || e.shiftKey) return
       if (e.key === '1') {
         e.preventDefault()
-        setShowPreview(false)
+        if (isWorkflowFile) setWorkflowViewMode('configuration')
+        else setShowPreview(false)
       } else if (e.key === '2') {
         e.preventDefault()
-        setShowPreview(true)
+        if (isWorkflowFile) setWorkflowViewMode('editor')
+        else setShowPreview(true)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [activeFile, isJsonFile])
+  }, [activeFile, isJsonFile, isWorkflowFile])
 
   return (
     <div className="flex-1 bg-[#1e1e1e] flex flex-col overflow-hidden">
@@ -838,8 +865,35 @@ export function BuilderDashboard({
         />
       )}
 
-      {/* Code / Preview toolbar for JSON layout files */}
-      {activeFile && isJsonFile && (
+      {/* Configuration + Editor toolbar for workflow files */}
+      {activeFile && isWorkflowFile && (
+        <div className="h-9 bg-[#252526] border-b border-[#3e3e3e] flex items-center gap-1 px-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`text-sm ${workflowViewMode === 'configuration' ? 'bg-[#3e3e3e] text-white' : 'text-gray-400 hover:text-gray-200'}`}
+            onClick={() => setWorkflowViewMode('configuration')}
+            title={`Configuration (${configShortcut})`}
+          >
+            <Code className="w-4 h-4 mr-1" />
+            Configuration
+            <span className="ml-1.5 opacity-60 text-xs font-normal">{configShortcut}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`text-sm ${workflowViewMode === 'editor' ? 'bg-[#3e3e3e] text-white' : 'text-gray-400 hover:text-gray-200'}`}
+            onClick={() => setWorkflowViewMode('editor')}
+            title={`Editor (${editorShortcut})`}
+          >
+            <Layout className="w-4 h-4 mr-1" />
+            Editor
+            <span className="ml-1.5 opacity-60 text-xs font-normal">{editorShortcut}</span>
+          </Button>
+        </div>
+      )}
+      {/* Code / Preview toolbar for layout JSON files (e.g. .ui.json) */}
+      {activeFile && isLayoutJsonFile && (
         <div className="h-9 bg-[#252526] border-b border-[#3e3e3e] flex items-center gap-1 px-2">
           <Button
             variant="ghost"
@@ -888,12 +942,24 @@ export function BuilderDashboard({
                 </StateProvider>
               </div>
             </div>
-          ) : layoutSpec === null && showPreview && isJsonFile ? (
+          ) : layoutSpec === null && showPreview && isLayoutJsonFile ? (
             <div className="flex-1 flex items-center justify-center p-8 text-gray-400">
               Invalid layout JSON. Ensure the file has a root object with a <code className="bg-[#3e3e3e] px-1 rounded">type</code> field.
             </div>
           ) : activeFile.source === 'git' ? (
             <GitDiffView file={activeFile} />
+          ) : isWorkflowFile && workflowViewMode === 'configuration' ? (
+            <JsonSplitView
+              file={activeFile}
+              diffRanges={[]}
+              onChange={handleFileChange}
+              onSave={handleSave}
+              onRegisterGetSelection={(getter) => {
+                getEditorSelectionRef.current = getter
+              }}
+            />
+          ) : isWorkflowFile && workflowViewMode === 'editor' ? (
+            <WorkflowEditorView json={activeFile.content} onChange={handleFileChange} />
           ) : isJsonFile ? (
             <JsonSplitView
               file={activeFile}
