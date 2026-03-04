@@ -14,6 +14,7 @@ import {
   appMove,
   appDelete,
 } from '@/desktop'
+import type { LaunchpadConfig } from '@/services/api'
 import type { ActiveApp } from './IDELayout'
 import { GitPanel } from './GitPanel'
 
@@ -349,6 +350,8 @@ interface LeftSidebarProps {
   refreshTrigger?: number
   /** Called after Pull or branch switch so open files can be reloaded from disk. */
   onPullOrBranchChange?: () => void
+  /** Current launchpad for workflow URL preview. */
+  selectedLaunchpad?: LaunchpadConfig | null
 }
 
 interface TreeNode {
@@ -370,6 +373,7 @@ export function LeftSidebar({
   onDeletePaths,
   refreshTrigger,
   onPullOrBranchChange,
+  selectedLaunchpad,
 }: LeftSidebarProps) {
   const [tree, setTree] = useState<TreeNode[]>([])
   const [loading, setLoading] = useState(false)
@@ -386,7 +390,13 @@ export function LeftSidebar({
 
   const [createAppUrlPathPrefix, setCreateAppUrlPathPrefix] = useState('')
   const [createFileName, setCreateFileName] = useState('')
+  const [createWorkflowMethod, setCreateWorkflowMethod] = useState<string>('POST')
+  const [createWorkflowPath, setCreateWorkflowPath] = useState('')
+  const [createWorkflowDescription, setCreateWorkflowDescription] = useState('')
+  const [createWorkflowAuth, setCreateWorkflowAuth] = useState<'none' | 'bearer'>('none')
   const pendingInputRef = useRef<HTMLInputElement>(null)
+
+  const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const
 
   useEffect(() => {
     if (pendingNewItem) {
@@ -474,6 +484,10 @@ export function LeftSidebar({
     setCreateAppName('')
     setCreateAppUrlPathPrefix('')
     setCreateFileName('')
+    setCreateWorkflowMethod('POST')
+    setCreateWorkflowPath('')
+    setCreateWorkflowDescription('')
+    setCreateWorkflowAuth('none')
     setShowCreateFileDialog(true)
   }, [])
 
@@ -526,8 +540,20 @@ export function LeftSidebar({
     setCreateAppName('')
     setCreateAppUrlPathPrefix('')
     setCreateFileName('')
+    setCreateWorkflowMethod('POST')
+    setCreateWorkflowPath('')
+    setCreateWorkflowDescription('')
+    setCreateWorkflowAuth('none')
     setError(null)
   }, [])
+
+  const prevCreateFileKindRef = useRef<'app' | 'ui' | 'workflow' | null>(null)
+  useEffect(() => {
+    if (createFileKind === 'workflow' && prevCreateFileKindRef.current !== 'workflow') {
+      setCreateWorkflowPath(crypto.randomUUID())
+    }
+    prevCreateFileKindRef.current = createFileKind
+  }, [createFileKind])
 
   const getCreateParentPath = useCallback(() => {
     return createParentPathOverride ?? getCreateTargetParentPath()
@@ -582,20 +608,34 @@ export function LeftSidebar({
 
   const submitCreateWorkflow = useCallback(async () => {
     if (!activeApp) return
-    let name = createFileName.trim().toLowerCase()
-    if (!name) return
-    if (!name.endsWith('.workflow.json')) name += '.workflow.json'
+    const path = createWorkflowPath.trim()
+    if (!path) return
     setError(null)
-    const fullPath = pathJoin(getCreateParentPath(), name)
+    const pathSegment = path.replace(/\/+/g, '/').replace(/^\//, '').split('/')[0] || path
+    const fileName = pathSegment.endsWith('.workflow.json') ? pathSegment : `${pathSegment}.workflow.json`
+    const fullPath = pathJoin(getCreateParentPath(), fileName)
+    const workflowContent = JSON.stringify(
+      {
+        method: createWorkflowMethod,
+        path,
+        description: createWorkflowDescription.trim() || undefined,
+        authentication: createWorkflowAuth,
+        id: pathSegment,
+        name: createWorkflowDescription.trim() || pathSegment,
+        version: '1.0.0',
+      },
+      null,
+      2
+    )
     try {
-      await appWriteTextFile(fullPath, '{}')
+      await appWriteTextFile(fullPath, workflowContent)
       await loadTree(activeApp.rootPath)
       closeCreateFileDialog()
-      if (onOpenFile) onOpenFile(fullPath, '{}')
+      if (onOpenFile) onOpenFile(fullPath, workflowContent)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [activeApp, createFileName, getCreateParentPath, loadTree, onOpenFile, closeCreateFileDialog])
+  }, [activeApp, createWorkflowMethod, createWorkflowPath, createWorkflowDescription, createWorkflowAuth, getCreateParentPath, loadTree, onOpenFile, closeCreateFileDialog])
 
   const handlePendingKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -1045,14 +1085,56 @@ export function LeftSidebar({
               ) : (
                 <div className="space-y-4">
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">File name</label>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">HTTP method</label>
+                    <select
+                      value={createWorkflowMethod}
+                      onChange={(e) => setCreateWorkflowMethod(e.target.value)}
+                      className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20"
+                    >
+                      {HTTP_METHODS.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Authentication</label>
+                    <select
+                      value={createWorkflowAuth}
+                      onChange={(e) => setCreateWorkflowAuth(e.target.value as 'none' | 'bearer')}
+                      className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20"
+                    >
+                      <option value="none">None</option>
+                      <option value="bearer">Bearer token</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Path</label>
                     <input
                       type="text"
-                      value={createFileName}
-                      onChange={(e) => setCreateFileName(e.target.value.toLowerCase())}
-                      placeholder="e.g. onboarding.workflow.json"
+                      value={createWorkflowPath}
+                      onChange={(e) => setCreateWorkflowPath(e.target.value)}
+                      placeholder="e.g. UUID or custom path"
                       className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-500 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20"
                     />
+                    <p className="mt-1 text-xs text-gray-500">Auto-generated UUID by default; you can overwrite with a custom path.</p>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Description</label>
+                    <textarea
+                      value={createWorkflowDescription}
+                      onChange={(e) => setCreateWorkflowDescription(e.target.value)}
+                      placeholder="Describe what this workflow does..."
+                      rows={3}
+                      className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-500 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 resize-y min-h-[72px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">URL</label>
+                    <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-gray-300 font-mono break-all">
+                      {selectedLaunchpad?.url
+                        ? `${selectedLaunchpad.url.replace(/\/$/, '')}/workflow/${createWorkflowPath || '(path)'}`
+                        : `\${launchpad_url}/workflow/${createWorkflowPath || '(path)'}`}
+                    </div>
                   </div>
                   <div className="flex gap-2 pt-1">
                     <button
@@ -1065,9 +1147,10 @@ export function LeftSidebar({
                     <button
                       type="button"
                       onClick={() => submitCreateWorkflow()}
-                      className="ml-auto rounded-lg bg-emerald-500/90 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-400"
+                      disabled={!createWorkflowPath.trim()}
+                      className="ml-auto rounded-lg bg-emerald-500/90 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Create
+                      Save
                     </button>
                   </div>
                 </div>
