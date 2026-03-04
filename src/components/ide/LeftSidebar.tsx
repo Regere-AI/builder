@@ -390,13 +390,12 @@ export function LeftSidebar({
 
   const [createAppUrlPathPrefix, setCreateAppUrlPathPrefix] = useState('')
   const [createFileName, setCreateFileName] = useState('')
-  const [createWorkflowMethod, setCreateWorkflowMethod] = useState<string>('POST')
   const [createWorkflowPath, setCreateWorkflowPath] = useState('')
   const [createWorkflowDescription, setCreateWorkflowDescription] = useState('')
-  const [createWorkflowAuth, setCreateWorkflowAuth] = useState<'none' | 'bearer'>('none')
+  const [createWorkflowTriggerType, setCreateWorkflowTriggerType] = useState<'httpTrigger'>('httpTrigger')
   const pendingInputRef = useRef<HTMLInputElement>(null)
 
-  const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const
+  const TRIGGER_TYPES = [{ value: 'httpTrigger' as const, label: 'HTTP trigger' }]
 
   useEffect(() => {
     if (pendingNewItem) {
@@ -484,10 +483,9 @@ export function LeftSidebar({
     setCreateAppName('')
     setCreateAppUrlPathPrefix('')
     setCreateFileName('')
-    setCreateWorkflowMethod('POST')
     setCreateWorkflowPath('')
     setCreateWorkflowDescription('')
-    setCreateWorkflowAuth('none')
+    setCreateWorkflowTriggerType('httpTrigger')
     setShowCreateFileDialog(true)
   }, [])
 
@@ -540,10 +538,9 @@ export function LeftSidebar({
     setCreateAppName('')
     setCreateAppUrlPathPrefix('')
     setCreateFileName('')
-    setCreateWorkflowMethod('POST')
     setCreateWorkflowPath('')
     setCreateWorkflowDescription('')
-    setCreateWorkflowAuth('none')
+    setCreateWorkflowTriggerType('httpTrigger')
     setError(null)
   }, [])
 
@@ -608,25 +605,42 @@ export function LeftSidebar({
 
   const submitCreateWorkflow = useCallback(async () => {
     if (!activeApp) return
-    const path = createWorkflowPath.trim()
+    const path = createWorkflowPath.trim().toLowerCase()
     if (!path) return
     setError(null)
     const pathSegment = path.replace(/\/+/g, '/').replace(/^\//, '').split('/')[0] || path
     const fileName = pathSegment.endsWith('.workflow.json') ? pathSegment : `${pathSegment}.workflow.json`
     const fullPath = pathJoin(getCreateParentPath(), fileName)
-    const workflowContent = JSON.stringify(
-      {
-        method: createWorkflowMethod,
-        path,
-        description: createWorkflowDescription.trim() || undefined,
-        authentication: createWorkflowAuth,
-        id: pathSegment,
-        name: createWorkflowDescription.trim() || pathSegment,
-        version: '1.0.0',
-      },
-      null,
-      2
-    )
+    const description = createWorkflowDescription.trim() || undefined
+    const baseWorkflow = {
+      triggerType: createWorkflowTriggerType,
+      path,
+      description,
+      id: pathSegment,
+      name: description || pathSegment,
+      version: '1.0.0',
+    }
+    const nodes =
+      createWorkflowTriggerType === 'httpTrigger'
+        ? [
+            {
+              id: 'trigger-1',
+              position: { x: 80, y: 100 },
+              type: 'httpTrigger',
+              data: {
+                method: 'POST',
+                path,
+                label: description,
+              },
+              sourcePosition: 'right' as const,
+            },
+          ]
+        : []
+    const workflowPayload = {
+      ...baseWorkflow,
+      data: { nodes, edges: [] },
+    }
+    const workflowContent = JSON.stringify(workflowPayload, null, 2)
     try {
       await appWriteTextFile(fullPath, workflowContent)
       await loadTree(activeApp.rootPath)
@@ -635,7 +649,7 @@ export function LeftSidebar({
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [activeApp, createWorkflowMethod, createWorkflowPath, createWorkflowDescription, createWorkflowAuth, getCreateParentPath, loadTree, onOpenFile, closeCreateFileDialog])
+  }, [activeApp, createWorkflowPath, createWorkflowDescription, createWorkflowTriggerType, getCreateParentPath, loadTree, onOpenFile, closeCreateFileDialog])
 
   const handlePendingKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -1085,34 +1099,26 @@ export function LeftSidebar({
               ) : (
                 <div className="space-y-4">
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">HTTP method</label>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Trigger type</label>
                     <select
-                      value={createWorkflowMethod}
-                      onChange={(e) => setCreateWorkflowMethod(e.target.value)}
+                      value={createWorkflowTriggerType}
+                      onChange={(e) => setCreateWorkflowTriggerType(e.target.value as 'httpTrigger')}
                       className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20"
                     >
-                      {HTTP_METHODS.map((m) => (
-                        <option key={m} value={m}>{m}</option>
+                      {TRIGGER_TYPES.map((t) => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
                       ))}
                     </select>
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Authentication</label>
-                    <select
-                      value={createWorkflowAuth}
-                      onChange={(e) => setCreateWorkflowAuth(e.target.value as 'none' | 'bearer')}
-                      className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20"
-                    >
-                      <option value="none">None</option>
-                      <option value="bearer">Bearer token</option>
-                    </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {createWorkflowTriggerType === 'httpTrigger' && 'Configure the HTTP endpoint below.'}
+                    </p>
                   </div>
                   <div>
                     <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">Path</label>
                     <input
                       type="text"
                       value={createWorkflowPath}
-                      onChange={(e) => setCreateWorkflowPath(e.target.value)}
+                      onChange={(e) => setCreateWorkflowPath(e.target.value.toLowerCase())}
                       placeholder="e.g. UUID or custom path"
                       className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm text-gray-100 placeholder:text-gray-500 outline-none transition-colors focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20"
                     />

@@ -959,7 +959,7 @@ export function BuilderDashboard({
               }}
             />
           ) : isWorkflowFile && workflowViewMode === 'editor' ? (
-            <WorkflowEditorView json={activeFile.content} />
+            <WorkflowEditorView json={activeFile.content} onChange={handleFileChange} />
           ) : isJsonFile ? (
             <JsonSplitView
               file={activeFile}
