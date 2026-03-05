@@ -1164,12 +1164,13 @@ export function LeftSidebar({
                                     <Info className="w-3.5 h-3.5" />
                                   </button>
                                 )}
-                                {svc.slug != null && String(svc.slug).trim() !== '' && selectedLaunchpad && onOpenApiSpec && (
+                                {svc.slug != null && selectedLaunchpad && onOpenApiSpec && (
                                   <button
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation()
-                                      onOpenApiSpec(String(svc.slug).trim(), selectedLaunchpad.url.replace(/\/$/, ''))
+                                      const slug = String(svc.slug).trim() || 'launchpad'
+                                      onOpenApiSpec(slug, selectedLaunchpad.url.replace(/\/$/, ''))
                                     }}
                                     className="shrink-0 p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-[#3e3e3e]"
                                     title="Open API spec"

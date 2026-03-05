@@ -1025,10 +1025,11 @@ pub async fn launchpad_get_service_spec(
 ) -> Result<serde_json::Value, String> {
     let base = base_url.trim_end_matches('/');
     let slug = slug.trim();
-    if slug.is_empty() {
-        return Err("Slug is required".to_string());
-    }
-    let url = format!("{}/proxy/{}/spec", base, slug);
+    let url = if slug.is_empty() || slug.eq_ignore_ascii_case("launchpad") {
+        format!("{}/spec", base)
+    } else {
+        format!("{}/proxy/{}/spec", base, slug)
+    };
     let client = Client::new();
     let res = client
         .get(&url)

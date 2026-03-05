@@ -422,7 +422,11 @@ export async function launchpadGetServiceSpec(
   sessionToken: string
 ): Promise<object> {
   if (!isTauri()) {
-    const url = `${baseUrl.replace(/\/$/, '')}/proxy/${encodeURIComponent(slug)}/spec`
+    const base = baseUrl.replace(/\/$/, '')
+    const s = slug.trim()
+    const url = s === '' || s.toLowerCase() === 'launchpad'
+      ? `${base}/spec`
+      : `${base}/proxy/${encodeURIComponent(s)}/spec`
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${sessionToken}` },
     })
