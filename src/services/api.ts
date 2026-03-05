@@ -4,6 +4,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core'
+import { isTauri } from '@/desktop'
 
 // ----- Types (mirror backend API responses; no network logic) -----
 
@@ -322,39 +323,23 @@ export function launchpadGet(id: string): (LaunchpadConfig & { password: string 
     : null
 }
 
-/** Login to launchpad (Auth Proxy: POST /proxy/authrs/login/email-password). Returns sessionToken on success.
- * Uses tenant from launchpad config in the X-Tenant-ID header. */
+/** Login to launchpad (Auth Proxy: POST /proxy/authrs/login/email-password). Returns sessionToken on success. Calls Rust backend. */
 export async function launchpadLogin(
   baseUrl: string,
   tenant: string,
   email: string,
   password: string
 ): Promise<{ sessionToken: string }> {
-  const url = baseUrl.replace(/\/$/, '') + '/proxy/authrs/login/email-password'
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'X-Tenant-ID': tenant, // tenant from launchpad config
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ email, password }),
+  if (!isTauri()) {
+    throw new Error('Launchpad login is only available in the desktop app')
+  }
+  const res = await invoke<{ sessionToken: string }>('launchpad_login', {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    tenant: tenant || '',
+    email,
+    password,
   })
-  if (!res.ok) {
-    const text = await res.text()
-    let message = `Login failed (${res.status})`
-    try {
-      const json = JSON.parse(text) as { message?: string; error?: string }
-      message = json.message ?? json.error ?? message
-    } catch {
-      if (text) message = text.slice(0, 200)
-    }
-    throw new Error(message)
-  }
-  const data = (await res.json()) as { sessionToken?: string }
-  if (!data.sessionToken) {
-    throw new Error('Login succeeded but no session token returned')
-  }
-  return { sessionToken: data.sessionToken }
+  return { sessionToken: res.sessionToken }
 }
 
 /** Launchpad health check (GET /health - Architect SDK health check). Returns true if healthy. */
@@ -364,16 +349,70 @@ export async function launchpadHealthCheck(baseUrl: string): Promise<boolean> {
   return res.ok
 }
 
-/** Launchpad session logout (POST /proxy/authrs/session/logout). Send Authorization: Bearer {sessionToken}. */
-export async function launchpadLogout(baseUrl: string, sessionToken: string): Promise<void> {
-  const url = baseUrl.replace(/\/$/, '') + '/proxy/authrs/session/logout'
-  await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${sessionToken}`,
-    },
+/** Response shape from GET /api/v1/services (list of services for the current launchpad). */
+export interface LaunchpadService {
+  id?: string
+  name?: string
+  serviceType?: string
+  slug?: string
+  baseUrl?: string
+  dockerImage?: string
+  tag?: string
+  [key: string]: unknown
+}
+
+/** Fetch list of services from the current launchpad (GET /api/v1/services). Calls Rust (src-tauri/src/api.rs). Returns [] when not in Tauri (e.g. web). */
+export async function launchpadGetServices(
+  baseUrl: string,
+  options: { sessionToken: string | null; tenant: string }
+): Promise<LaunchpadService[]> {
+  if (!isTauri()) {
+    return []
+  }
+  const list = await invoke<LaunchpadService[]>('launchpad_get_services', {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    sessionToken: options.sessionToken,
+    tenant: options.tenant || '',
   })
-  // Best-effort: don't throw on non-ok so switch still proceeds
+  return Array.isArray(list) ? list : []
+}
+
+/** Register a new service in the launchpad (POST /api/v1/services). Calls Rust backend. */
+export async function launchpadRegisterService(
+  baseUrl: string,
+  options: { sessionToken: string; tenant: string },
+  service: {
+    slug: string
+    name: string
+    baseUrl: string
+    serviceType: string
+    dockerImage?: string
+    tag?: string
+  }
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error('Register service is only available in the desktop app')
+  }
+  await invoke('launchpad_register_service', {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    sessionToken: options.sessionToken,
+    tenant: options.tenant || '',
+    slug: service.slug.trim(),
+    name: service.name.trim(),
+    serviceBaseUrl: service.baseUrl.trim(),
+    serviceType: service.serviceType.trim() || 'other',
+    dockerImage: service.dockerImage?.trim() || null,
+    tag: service.tag?.trim() || null,
+  })
+}
+
+/** Launchpad session logout (POST /proxy/authrs/session/logout). Calls Rust backend. No-op when not in Tauri. */
+export async function launchpadLogout(baseUrl: string, sessionToken: string): Promise<void> {
+  if (!isTauri()) return
+  await invoke('launchpad_logout', {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    sessionToken,
+  })
 }
 
 const LAUNCHPAD_SESSION_STORAGE_KEY = 'builder_launchpad_session'

@@ -161,6 +161,8 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
           onDeletePaths={handleFilesDeletedFromSidebar}
           refreshTrigger={sidebarRefreshTrigger}
           onPullOrBranchChange={handleGitAffectedFiles}
+          selectedLaunchpad={selectedLaunchpad}
+          onSwitchLaunchpad={onSwitchLaunchpad}
         />
 
         {/* Center Content - BuilderDashboard */}

@@ -550,6 +550,10 @@ pub fn run() {
             api::api_modify,
             api::api_goal,
             api::api_agent_health,
+            api::launchpad_get_services,
+            api::launchpad_register_service,
+            api::launchpad_login,
+            api::launchpad_logout,
         ])
         .run(tauri::generate_context!())
     {
