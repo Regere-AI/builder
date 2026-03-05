@@ -415,6 +415,27 @@ export async function launchpadLogout(baseUrl: string, sessionToken: string): Pr
   })
 }
 
+/** Fetch OpenAPI spec for a service (GET /proxy/{slug}/spec). Calls Rust backend. */
+export async function launchpadGetServiceSpec(
+  baseUrl: string,
+  slug: string,
+  sessionToken: string
+): Promise<object> {
+  if (!isTauri()) {
+    const url = `${baseUrl.replace(/\/$/, '')}/proxy/${encodeURIComponent(slug)}/spec`
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    })
+    if (!res.ok) throw new Error(`Failed to load spec: ${res.status} ${res.statusText}`)
+    return res.json()
+  }
+  return invoke<object>('launchpad_get_service_spec', {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    slug: slug.trim(),
+    sessionToken,
+  })
+}
+
 const LAUNCHPAD_SESSION_STORAGE_KEY = 'builder_launchpad_session'
 
 export interface LaunchpadSession {

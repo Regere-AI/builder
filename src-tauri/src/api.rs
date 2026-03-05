@@ -1014,3 +1014,46 @@ pub async fn launchpad_logout(base_url: String, session_token: String) -> Result
     }
     Ok(())
 }
+
+// ---------- Launchpad: GET /proxy/{slug}/spec (OpenAPI spec for a service) ----------
+
+#[tauri::command]
+pub async fn launchpad_get_service_spec(
+    base_url: String,
+    slug: String,
+    session_token: String,
+) -> Result<serde_json::Value, String> {
+    let base = base_url.trim_end_matches('/');
+    let slug = slug.trim();
+    if slug.is_empty() {
+        return Err("Slug is required".to_string());
+    }
+    let url = format!("{}/proxy/{}/spec", base, slug);
+    let client = Client::new();
+    let res = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", session_token))
+        .send()
+        .await
+        .map_err(|e| format!("Spec request failed: {}", map_reqwest_error(e, "Request failed")))?;
+    let status = res.status();
+    let text = res
+        .text()
+        .await
+        .map_err(|e| format!("Spec response read failed: {}", map_reqwest_error(e, "Read failed")))?;
+    if !status.is_success() {
+        let message: String = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|j| {
+                j.get("message")
+                    .or(j.get("error"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| text.chars().take(200).collect::<String>());
+        return Err(format!("Spec failed ({}): {}", status, message));
+    }
+    let spec: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Invalid spec JSON: {}", e))?;
+    Ok(spec)
+}

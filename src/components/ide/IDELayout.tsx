@@ -46,6 +46,7 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
   }, [])
   const openFileFromSidebarHandlerRef = useRef<((path: string, content: string, options?: { fromGit?: boolean }) => void) | null>(null)
   const filesDeletedFromSidebarHandlerRef = useRef<((paths: string[]) => void) | null>(null)
+  const openApiSpecHandlerRef = useRef<((slug: string, launchpadUrl: string) => void) | null>(null)
   const fileChangeUnlistenRef = useRef<null | (() => void)>(null)
   const handleOpenFileFromSidebar = useCallback((path: string, content: string, options?: { fromGit?: boolean }) => {
     openFileFromSidebarHandlerRef.current?.(path, content, options)
@@ -163,6 +164,7 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
           onPullOrBranchChange={handleGitAffectedFiles}
           selectedLaunchpad={selectedLaunchpad}
           onSwitchLaunchpad={onSwitchLaunchpad}
+          onOpenApiSpec={(slug, launchpadUrl) => openApiSpecHandlerRef.current?.(slug, launchpadUrl)}
         />
 
         {/* Center Content - BuilderDashboard */}
@@ -173,6 +175,7 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
           activeApp={activeApp}
           registerOpenFileFromSidebar={(handler) => { openFileFromSidebarHandlerRef.current = handler }}
           registerFilesDeletedFromSidebar={(handler) => { filesDeletedFromSidebarHandlerRef.current = handler }}
+          registerOpenApiSpec={(handler) => { openApiSpecHandlerRef.current = handler }}
           onAppFilesChanged={() => setSidebarRefreshTrigger((n) => n + 1)}
           onAgentResponseProcessed={() => setAgentResponse(undefined)}
           onAddSelectionToChat={handleAddSelectionToChat}

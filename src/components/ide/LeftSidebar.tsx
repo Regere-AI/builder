@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
-import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search, Package, LayoutDashboard, GitBranch, FileText, Info, Cog, Globe, RefreshCw, Container, Copy } from 'lucide-react'
+import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search, Package, LayoutDashboard, GitBranch, FileText, Info, Cog, Globe, RefreshCw, Container, Copy, BookOpen } from 'lucide-react'
 import { Tree } from 'react-arborist'
 import type { NodeRendererProps } from 'react-arborist'
 import type { TreeApi } from 'react-arborist'
@@ -424,6 +424,8 @@ interface LeftSidebarProps {
   selectedLaunchpad?: LaunchpadConfig | null
   /** Open launchpad selector (e.g. to switch launchpad). */
   onSwitchLaunchpad?: () => void
+  /** Open API spec in a new editor tab (slug + launchpad URL). */
+  onOpenApiSpec?: (slug: string, launchpadUrl: string) => void
 }
 
 interface TreeNode {
@@ -447,6 +449,7 @@ export function LeftSidebar({
   onPullOrBranchChange,
   selectedLaunchpad,
   onSwitchLaunchpad: _onSwitchLaunchpad,
+  onOpenApiSpec,
 }: LeftSidebarProps) {
   const [explorerPaneOpen, setExplorerPaneOpen] = useState(true)
   const [serviceRegistryPaneOpen, setServiceRegistryPaneOpen] = useState(true)
@@ -1159,6 +1162,19 @@ export function LeftSidebar({
                                     title="Service details"
                                   >
                                     <Info className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                {svc.slug != null && String(svc.slug).trim() !== '' && selectedLaunchpad && onOpenApiSpec && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      onOpenApiSpec(String(svc.slug).trim(), selectedLaunchpad.url.replace(/\/$/, ''))
+                                    }}
+                                    className="shrink-0 p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-[#3e3e3e]"
+                                    title="Open API spec"
+                                  >
+                                    <BookOpen className="w-3.5 h-3.5" />
                                   </button>
                                 )}
                               </div>

@@ -5,12 +5,28 @@ import { EditorView } from './EditorView'
 import { JsonSplitView } from './JsonSplitView'
 import { EditorTabs, type EditorFile } from './EditorTabs'
 import { BuilderSettingsView } from './BuilderSettingsView'
+import { ApiSpecViewer } from './ApiSpecViewer'
 import type { Spec } from '@json-render/core'
 import { Renderer, StateProvider, VisibilityProvider, ActionProvider } from '@json-render/react'
 import { registry } from '@/lib/json-render/registry'
 import { parseToSpec, isJsonRenderSpec } from '@/lib/json-render/layout-to-spec'
 
 export const SETTINGS_TAB_PATH = 'builder://settings'
+const API_SPEC_VIEWER_PATH_PREFIX = 'api-spec-viewer://'
+
+function parseApiSpecViewerPath(path: string): { slug: string; launchpadUrl: string } | null {
+  if (!path.startsWith(API_SPEC_VIEWER_PATH_PREFIX)) return null
+  try {
+    const rest = path.slice(API_SPEC_VIEWER_PATH_PREFIX.length)
+    const q = rest.indexOf('?')
+    const slug = q >= 0 ? rest.slice(0, q) : rest
+    const launchpadUrl = q >= 0 ? new URLSearchParams(rest.slice(q)).get('launchpadUrl') : null
+    if (!slug || !launchpadUrl) return null
+    return { slug, launchpadUrl }
+  } catch {
+    return null
+  }
+}
 import {
   openFile as desktopOpenFile,
   saveFile as desktopSaveFile,
@@ -43,6 +59,7 @@ interface BuilderDashboardProps {
   activeApp?: ActiveApp | null
   registerOpenFileFromSidebar?: (handler: (path: string, content: string, options?: { fromGit?: boolean }) => void) => void
   registerFilesDeletedFromSidebar?: (handler: (paths: string[]) => void) => void
+  registerOpenApiSpec?: (handler: (slug: string, launchpadUrl: string) => void) => void
   onAppFilesChanged?: () => void
   onAgentResponseProcessed?: () => void
   agentResponse?: AgentResponsePayload
@@ -60,6 +77,7 @@ export function BuilderDashboard({
   activeApp,
   registerOpenFileFromSidebar,
   registerFilesDeletedFromSidebar,
+  registerOpenApiSpec,
   onAppFilesChanged,
   onAgentResponseProcessed,
   agentResponse,
@@ -235,6 +253,30 @@ export function BuilderDashboard({
     return () => registerFilesDeletedFromSidebar(() => {})
   }, [registerFilesDeletedFromSidebar])
 
+  useEffect(() => {
+    if (!registerOpenApiSpec) return
+    const handler = (slug: string, launchpadUrl: string) => {
+      const path = `${API_SPEC_VIEWER_PATH_PREFIX}${slug}?launchpadUrl=${encodeURIComponent(launchpadUrl)}`
+      const existing = openFilesRef.current.find((f) => f.path === path)
+      if (existing) {
+        setActiveFile(existing)
+        return
+      }
+      const specFile: EditorFile = {
+        path,
+        name: `API: ${slug}`,
+        displayName: `API: ${slug}`,
+        source: 'normal',
+        content: '',
+        isModified: false,
+      }
+      setOpenFiles((prev) => [...prev, specFile])
+      setActiveFile(specFile)
+    }
+    registerOpenApiSpec(handler)
+    return () => registerOpenApiSpec(() => {})
+  }, [registerOpenApiSpec])
+
   // Tauri: handle app:add-selection-to-chat (Ctrl+L / Cmd+L global shortcut)
   useEffect(() => {
     if (!isTauri() || !onAddSelectionToChat) return
@@ -373,6 +415,7 @@ export function BuilderDashboard({
 
   const handleFileChange = (value: string) => {
     if (!activeFile) return
+    if (activeFile.path.startsWith(API_SPEC_VIEWER_PATH_PREFIX)) return
 
     setOpenFiles((prev) =>
       prev.map((f) =>
@@ -416,6 +459,7 @@ export function BuilderDashboard({
   const handleSave = async () => {
     if (!activeFile) return
     if (activeFile.path === SETTINGS_TAB_PATH) return
+    if (activeFile.path.startsWith(API_SPEC_VIEWER_PATH_PREFIX)) return
     if (!isTauri()) return
     const hasRealPath = activeFile.path.includes('/') || activeFile.path.includes('\\')
     if (hasRealPath) {
@@ -462,6 +506,7 @@ export function BuilderDashboard({
   const handleSaveAs = async () => {
     if (!activeFile) return
     if (activeFile.path === SETTINGS_TAB_PATH) return
+    if (activeFile.path.startsWith(API_SPEC_VIEWER_PATH_PREFIX)) return
     if (!isTauri()) return
     try {
       const result = await desktopSaveFile(activeFile.content)
@@ -927,7 +972,14 @@ export function BuilderDashboard({
           <div className="flex-1 flex items-center justify-center p-8 text-gray-300">
             Agent Response Viewer (to be implemented)
           </div>
-        ) : activeFile?.path === SETTINGS_TAB_PATH ? (
+        ) : (() => {
+          const apiSpecParams = activeFile ? parseApiSpecViewerPath(activeFile.path) : null
+          return apiSpecParams ? (
+            <div className="flex-1 flex flex-col min-h-0 overflow-auto bg-[#1e1e1e]">
+              <ApiSpecViewer slug={apiSpecParams.slug} launchpadUrl={apiSpecParams.launchpadUrl} />
+            </div>
+          ) : null
+        })() ?? (activeFile?.path === SETTINGS_TAB_PATH ? (
           <BuilderSettingsView user={user} />
         ) : activeFile ? (
           showLayoutPreview ? (
@@ -1020,7 +1072,7 @@ export function BuilderDashboard({
               </div>
             </div>
           </div>
-        )}
+        ) )}
       </div>
     </div>
   )

@@ -554,6 +554,7 @@ pub fn run() {
             api::launchpad_register_service,
             api::launchpad_login,
             api::launchpad_logout,
+            api::launchpad_get_service_spec,
         ])
         .run(tauri::generate_context!())
     {
