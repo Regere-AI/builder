@@ -153,6 +153,11 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
     lastPushedLength: number
   } | null>(null)
 
+  /** Last finalized spec (after stream ends). Sent as currentSpec on next message for same-layout patches. */
+  const lastFinalSpecRef = useRef<Spec | null>(null)
+  /** Spec we sent with the current request (used as initial for compiler when stream starts). */
+  const sentCurrentSpecRef = useRef<Spec | null>(null)
+
   /** Live spec while the last assistant message is streaming (progressive SpecStream rendering). */
   const [liveStreamingSpec, setLiveStreamingSpec] = useState<Spec | null>(null)
   /** Shown when streaming finishes and generated JSON was written to file. */
@@ -165,6 +170,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
       openaiApiKey: s.openaiApiKey,
       claudeApiKey: s.claudeApiKey,
       googleApiKey: s.googleApiKey,
+      currentSpec: undefined as Spec | undefined,
     }
   }())
   useEffect(() => {
@@ -172,7 +178,9 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
     if (!s.selectedModel) setBuilderSettings({ selectedModel: 'openai' })
   }, [])
   useEffect(() => {
+    const prev = chatBodyRef.current
     chatBodyRef.current = {
+      ...prev,
       model: selectedModel,
       openaiApiKey: getBuilderSettings().openaiApiKey,
       claudeApiKey: getBuilderSettings().claudeApiKey,
@@ -225,9 +233,13 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
       return
     }
     if (!specStreamRef.current || specStreamRef.current.messageId !== last.id) {
+      // Same-layout modification: when we sent currentSpec, apply patches on top of it
+      const initial = sentCurrentSpecRef.current
+        ? (JSON.parse(JSON.stringify(sentCurrentSpecRef.current)) as Record<string, unknown>)
+        : undefined
       specStreamRef.current = {
         messageId: last.id,
-        compiler: createSpecStreamCompiler<Record<string, unknown>>(),
+        compiler: createSpecStreamCompiler<Record<string, unknown>>(initial),
         lastPushedLength: 0,
       }
     }
@@ -411,6 +423,15 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
             }
           }
         }
+        // If we already pushed everything during streaming, get result from compiler (e.g. refinement mode)
+        if (!code) {
+          try {
+            const result = state.compiler.getResult()
+            if (result && isJsonRenderSpec(result)) code = JSON.stringify(result, null, 2)
+          } catch {
+            // ignore
+          }
+        }
       }
     }
 
@@ -446,9 +467,11 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
       const parsed = JSON.parse(code) as Record<string, unknown>
       const normalized = ensureSpecHasRoot(parsed)
       if (normalized) code = JSON.stringify(normalized, null, 2)
+      if (isJsonRenderSpec(parsed)) lastFinalSpecRef.current = (normalized ?? parsed) as Spec
     } catch {
       // keep code as-is
     }
+    sentCurrentSpecRef.current = null
 
     const notifyAndOpen = (resolvedPath?: string) => {
       setUiGeneratedMessage('UI successfully generated')
@@ -510,6 +533,8 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
 
     if (CHAT_API_URL && transport) {
       try {
+        chatBodyRef.current.currentSpec = lastFinalSpecRef.current ?? undefined
+        sentCurrentSpecRef.current = lastFinalSpecRef.current
         await sendMessage({ text: prompt })
       } catch (err) {
         console.error('Chat send failed:', err)

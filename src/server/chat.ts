@@ -2,6 +2,10 @@
  * AI SDK chat API server. Serves POST /api/chat for useChat.
  * Uses API keys and model from request body (Builder settings).
  * Run with: npx tsx src/server/chat.ts (or node after build).
+ *
+ * Same-layout modification: when body.currentSpec is provided, the last user message
+ * is rewritten with buildUserPrompt({ prompt, currentSpec }) so the model outputs
+ * only RFC 6902 patches to apply to the existing spec (state is preserved).
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import { Readable } from 'stream'
@@ -9,6 +13,7 @@ import { streamText } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { buildUserPrompt, type Spec } from '@json-render/core'
 import { catalog } from '../lib/json-render/catalog'
 
 const PORT = Number(process.env.CHAT_SERVER_PORT) || 3030
@@ -30,12 +35,25 @@ const DEFAULT_MODEL_IDS: Record<BuilderModelId, string> = {
   google: 'gemini-2.0-flash',
 }
 
+/** Minimal spec shape for patch-only (refinement) mode. */
+function isNonEmptySpec(spec: unknown): spec is { root: string; elements: Record<string, unknown> } {
+  return (
+    spec != null &&
+    typeof spec === 'object' &&
+    typeof (spec as { root?: unknown }).root === 'string' &&
+    (spec as { elements?: unknown }).elements != null &&
+    typeof (spec as { elements: unknown }).elements === 'object'
+  )
+}
+
 interface ChatRequestBody {
   messages?: Array<{ role: string; content?: string; parts?: Array<{ type: string; text?: string }> }>
   model?: BuilderModelId
   openaiApiKey?: string
   claudeApiKey?: string
   googleApiKey?: string
+  /** When set, last user message is rewritten for patch-only mode (output only patches). */
+  currentSpec?: unknown
 }
 
 function getApiKey(model: BuilderModelId, body: ChatRequestBody): string | null {
@@ -101,43 +119,42 @@ async function handlePost(req: IncomingMessage, res: ServerResponse): Promise<vo
     return
   }
 
-  const modelMessages = convertToModelMessages(parsed.messages)
+  let modelMessages = convertToModelMessages(parsed.messages)
   if (modelMessages.length === 0) {
     sendError(res, 400, 'No messages')
     return
+  }
+
+  // Same-layout modification: if client sent currentSpec, ask model to output only patches
+  const currentSpec = parsed.currentSpec
+  if (isNonEmptySpec(currentSpec)) {
+    const lastUser = modelMessages.filter((m) => m.role === 'user').pop()
+    if (lastUser) {
+      try {
+        const refinementPrompt = buildUserPrompt({
+          prompt: lastUser.content,
+          currentSpec: currentSpec as Spec,
+        })
+        modelMessages = modelMessages.map((m) =>
+          m === lastUser ? { ...m, content: refinementPrompt } : m
+        )
+      } catch (e) {
+        console.error('[chat] buildUserPrompt failed:', e)
+        // Continue with original messages
+      }
+    }
   }
 
   const systemPrompt =
     getSystemPrompt() +
     `
 
-Output ONLY SpecStream format: one JSON object per line. Each line must be a single RFC 6902 JSON patch. No other text, no markdown, no explanation.
+Output ONLY SpecStream: one JSON object per line. Each line is a single RFC 6902 patch. No other text or markdown.
 
-Supported operations (use "op", "path"; "value" for add/replace/test; "from" for move/copy):
-- add: add value at path (use for /root and /elements/<id>). Requires "value".
-- remove: remove value at path.
-- replace: replace value at path. Requires "value".
-- move: move value from path to another. Requires "from" and "path".
-- copy: copy value from path to another. Requires "from" and "path".
-- test: assert value at path equals given value. Requires "value".
+Ops: add, remove, replace (need "value"); move, copy (need "from" and "path"); test (need "value").
+Paths: /root, /elements/<id>, /elements/<id>/props, /elements/<id>/children, /state, /state/<path>.
 
-Paths (JSON Pointer): /root = root element id; /elements/<id> = element; /elements/<id>/props, /elements/<id>/children = nested fields.
-
-For forms: use type "Input" (not "Label" or "Text") for every field where the user types (name, email, phone). Add state for form data (e.g. /state/contact with name, email, phone). Bind each Input value with $bindState to that state path.
-
-Example form (one line per object):
-{"op":"add","path":"/root","value":"card-1"}
-{"op":"add","path":"/elements/card-1","value":{"type":"Card","props":{"title":"Contact Form"},"children":["name-label","name-input","email-label","email-input","phone-label","phone-input","btn"]}}
-{"op":"add","path":"/elements/name-label","value":{"type":"Label","props":{"content":"Name"},"children":[]}}
-{"op":"add","path":"/elements/name-input","value":{"type":"Input","props":{"placeholder":"Your name","value":{"$bindState":"/contact/name"}},"children":[]}}
-{"op":"add","path":"/elements/email-label","value":{"type":"Label","props":{"content":"Email"},"children":[]}}
-{"op":"add","path":"/elements/email-input","value":{"type":"Input","props":{"placeholder":"Email","type":"email","value":{"$bindState":"/contact/email"}},"children":[]}}
-{"op":"add","path":"/elements/phone-label","value":{"type":"Label","props":{"content":"Phone Number"},"children":[]}}
-{"op":"add","path":"/elements/phone-input","value":{"type":"Input","props":{"placeholder":"Phone","value":{"$bindState":"/contact/phone"}},"children":[]}}
-{"op":"add","path":"/elements/btn","value":{"type":"Button","props":{"label":"Submit"},"children":[]}}
-{"op":"add","path":"/state/contact","value":{"name":"","email":"","phone":""}}
-
-Build the UI by adding /root first, then each element. For edits, use replace/remove/move/copy as needed.`
+Add /root first, then elements. For forms use Input with value: { "$bindState": "/state/path" } and add /state/<path> for initial values. When the user message includes "CURRENT UI STATE", output only the patches for the requested change.`
   const messages = modelMessages.map((m) => ({ role: m.role, content: m.content }))
 
   let model: ReturnType<typeof createOpenAI> extends (id: string, opts?: unknown) => infer R ? R : never
