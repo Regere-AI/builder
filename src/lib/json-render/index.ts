@@ -4,7 +4,7 @@
  * - catalog: component and action definitions for AI (catalog.prompt() for system prompt).
  * - registry: React component registry for <Renderer spec={spec} registry={registry} />.
  * - layout-to-spec: convert legacy LayoutNode JSON to flat Spec for the React renderer.
- * - streaming: SpecStream compiler helpers (createSpecStreamCompiler, compileSpecStream).
+ * - streaming: SpecStream (RFC 6902 JSON Patch: add, remove, replace, move, copy, test); createSpecStreamCompiler, compileSpecStream.
  * - zustand-store: Zustand-backed StateStore used with StateProvider / JSONUIProvider (controlled mode).
  *
  * StateStore (Zustand): We use @json-render/zustand to back json-render state with a Zustand
@@ -26,7 +26,7 @@
  */
 
 export { catalog, type Catalog } from './catalog'
-export { registry } from './registry'
+export { registry, handlers, jsonRenderActionHandlers } from './registry'
 export {
   createSpecStreamCompiler,
   compileSpecStream,
@@ -38,4 +38,4 @@ export {
   type LayoutNode,
   type JsonRenderSpec,
 } from './layout-to-spec'
-export { jsonRenderStateStore } from './zustand-store'
+export { jsonRenderStateStore, useJsonRenderState } from './zustand-store'

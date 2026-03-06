@@ -21,8 +21,9 @@ import {
 import type { Spec } from '@json-render/core'
 import { createSpecStreamCompiler, compileSpecStream } from '@json-render/core'
 import { parseToSpec, isJsonRenderSpec, ensureSpecHasRoot } from '@/lib/json-render/layout-to-spec'
-import { registry } from '@/lib/json-render/registry'
+import { registry, jsonRenderActionHandlers } from '@/lib/json-render/registry'
 import { jsonRenderStateStore } from '@/lib/json-render/zustand-store'
+import { StateDebugPane } from './StateDebugPane'
 
 const MODEL_OPTIONS: { value: BuilderModelId; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
@@ -115,14 +116,17 @@ function AssistantMessageBubble({
       )}
       {isStreaming && !hasText && <p className="text-sm text-gray-500">…</p>}
       {displaySpec && (
-        <div className="rounded-md border border-[#3e3e3e] bg-[#1e1e1e] p-3 overflow-auto max-h-[280px]">
-          <StateProvider store={jsonRenderStateStore}>
-            <VisibilityProvider>
-              <ActionProvider handlers={{}}>
-                <Renderer spec={displaySpec} registry={registry} loading={isStreaming} />
-              </ActionProvider>
-            </VisibilityProvider>
-          </StateProvider>
+        <div className="flex flex-col gap-2">
+          <div className="rounded-md border border-[#3e3e3e] bg-[#1e1e1e] p-3 overflow-auto max-h-[280px]">
+            <StateProvider store={jsonRenderStateStore}>
+              <VisibilityProvider>
+                <ActionProvider handlers={jsonRenderActionHandlers}>
+                  <Renderer spec={displaySpec} registry={registry} loading={isStreaming} />
+                </ActionProvider>
+              </VisibilityProvider>
+            </StateProvider>
+          </div>
+          <StateDebugPane defaultCollapsed label="State" />
         </div>
       )}
     </div>

@@ -54,7 +54,7 @@ export const catalog = defineCatalog(schema, {
         content: z.string(),
         className: z.string().nullable().optional(),
       }),
-      description: 'Text paragraph or label',
+      description: 'Static text or paragraph only. Do NOT use for form data entry; use Input for any field where the user types.',
     },
     Input: {
       props: z.object({
@@ -63,14 +63,14 @@ export const catalog = defineCatalog(schema, {
         type: z.enum(['text', 'password', 'email', 'number']).nullable().optional(),
         disabled: z.boolean().nullable().optional(),
       }),
-      description: 'Text input field; use $bindState on value for two-way binding',
+      description: 'Editable text field for user input. Use Input (not Label or Text) for every form field where the user must type: name, email, phone, etc. Use $bindState on value to bind to state (e.g. /form/name).',
     },
     Label: {
       props: z.object({
         content: z.string(),
         htmlFor: z.string().nullable().optional(),
       }),
-      description: 'Form label',
+      description: 'Optional label text displayed above or beside a form control. For data entry fields always add an Input; Label alone does not allow typing.',
     },
     Checkbox: {
       props: z.object({
@@ -128,6 +128,12 @@ export const catalog = defineCatalog(schema, {
     press: {
       params: z.object({}),
       description: 'Button or control pressed',
+    },
+    ask: {
+      params: z.object({
+        question: z.string().describe('Strategic or business question (e.g. technology foundation, cloud, security, compliance)'),
+      }),
+      description: 'Submit a strategic or business question; stores question and response in state for display (e.g. /prompt/question, /prompt/response)',
     },
   },
 })

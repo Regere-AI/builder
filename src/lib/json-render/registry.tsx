@@ -1,5 +1,6 @@
 import { defineRegistry, useBoundProp } from '@json-render/react'
 import { catalog } from './catalog'
+import { getJsonRenderState, setJsonRenderState } from './zustand-store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -9,8 +10,9 @@ import { cn } from '@/lib/utils'
 /**
  * React component registry for json-render: maps catalog types to UI components.
  * Use with <Renderer spec={spec} registry={registry} />.
+ * Use handlers(getSetState, getState) for <ActionProvider handlers={...} /> with the Zustand store.
  */
-export const { registry } = defineRegistry(catalog, {
+export const { registry, handlers } = defineRegistry(catalog, {
   components: {
     Card: ({ props, children }) => (
       <div
@@ -158,12 +160,28 @@ export const { registry } = defineRegistry(catalog, {
     ),
   },
   actions: {
-    submit: async (params) => {
-      console.log('Action submit', params)
+    submit: async (params, setState) => {
+      setState?.((prev) => ({ ...prev, formResult: { submitted: true, formId: (params as { formId?: string }).formId } }))
     },
     navigate: async (params) => {
-      if (typeof window !== 'undefined' && params?.url) window.open(params.url as string, '_blank')
+      if (typeof window !== 'undefined' && (params as { url?: string })?.url) {
+        window.open((params as { url: string }).url, '_blank')
+      }
     },
     press: async () => {},
+    ask: async (params, setState) => {
+      const question = (params as { question?: string }).question ?? ''
+      setState?.((prev) => ({
+        ...prev,
+        prompt: {
+          ...(typeof prev?.prompt === 'object' && prev.prompt !== null ? (prev.prompt as Record<string, unknown>) : {}),
+          question,
+          response: 'Received. In a full setup this would call your API and return a comprehensive answer (e.g. on cloud strategy, cybersecurity, data governance, disaster recovery, compliance).',
+        },
+      }))
+    },
   },
 })
+
+/** ActionProvider-compatible handlers backed by the Zustand StateStore. Use with StateProvider store={jsonRenderStateStore}. */
+export const jsonRenderActionHandlers = handlers(() => setJsonRenderState, () => getJsonRenderState())

@@ -8,9 +8,10 @@ import { BuilderSettingsView } from './BuilderSettingsView'
 import { ApiSpecViewer } from './ApiSpecViewer'
 import type { Spec } from '@json-render/core'
 import { Renderer, JSONUIProvider } from '@json-render/react'
-import { registry } from '@/lib/json-render/registry'
+import { registry, jsonRenderActionHandlers } from '@/lib/json-render/registry'
 import { jsonRenderStateStore } from '@/lib/json-render/zustand-store'
 import { parseToSpec, isJsonRenderSpec } from '@/lib/json-render/layout-to-spec'
+import { StateDebugPane } from './StateDebugPane'
 
 export const SETTINGS_TAB_PATH = 'builder://settings'
 const API_SPEC_VIEWER_PATH_PREFIX = 'api-spec-viewer://'
@@ -984,12 +985,13 @@ export function BuilderDashboard({
           <BuilderSettingsView user={user} />
         ) : activeFile ? (
           showLayoutPreview ? (
-            <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e]">
-              <div className="min-h-full rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
-                <JSONUIProvider registry={registry} store={jsonRenderStateStore} handlers={{}}>
+            <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e] flex flex-col gap-4">
+              <div className="min-h-0 flex-1 rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
+                <JSONUIProvider registry={registry} store={jsonRenderStateStore} handlers={jsonRenderActionHandlers}>
                   <Renderer spec={layoutSpec as Spec} registry={registry} />
                 </JSONUIProvider>
               </div>
+              <StateDebugPane defaultCollapsed label="State" />
             </div>
           ) : layoutSpec === null && showPreview && isLayoutJsonFile ? (
             <div className="flex-1 flex items-center justify-center p-8 text-gray-400">

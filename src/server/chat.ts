@@ -111,15 +111,33 @@ async function handlePost(req: IncomingMessage, res: ServerResponse): Promise<vo
     getSystemPrompt() +
     `
 
-Output ONLY SpecStream format: one JSON object per line. Each line must be a single JSON patch (RFC 6902) with "op", "path", and "value". No other text, no markdown, no explanation.
+Output ONLY SpecStream format: one JSON object per line. Each line must be a single RFC 6902 JSON patch. No other text, no markdown, no explanation.
 
-Example (output exactly like this, one line per object):
-{"op":"add","path":"/root","value":"root-1"}
-{"op":"add","path":"/elements/root-1","value":{"type":"Card","props":{"title":"Dashboard"},"children":["m1","m2"]}}
-{"op":"add","path":"/elements/m1","value":{"type":"Text","props":{"content":"Hello"},"children":[]}}
-{"op":"add","path":"/elements/m2","value":{"type":"Button","props":{"label":"Click"},"children":[]}}
+Supported operations (use "op", "path"; "value" for add/replace/test; "from" for move/copy):
+- add: add value at path (use for /root and /elements/<id>). Requires "value".
+- remove: remove value at path.
+- replace: replace value at path. Requires "value".
+- move: move value from path to another. Requires "from" and "path".
+- copy: copy value from path to another. Requires "from" and "path".
+- test: assert value at path equals given value. Requires "value".
 
-Paths: /root for the root element id; /elements/<id> for each element. Build the UI by adding root first, then each element under /elements/<id>.`
+Paths (JSON Pointer): /root = root element id; /elements/<id> = element; /elements/<id>/props, /elements/<id>/children = nested fields.
+
+For forms: use type "Input" (not "Label" or "Text") for every field where the user types (name, email, phone). Add state for form data (e.g. /state/contact with name, email, phone). Bind each Input value with $bindState to that state path.
+
+Example form (one line per object):
+{"op":"add","path":"/root","value":"card-1"}
+{"op":"add","path":"/elements/card-1","value":{"type":"Card","props":{"title":"Contact Form"},"children":["name-label","name-input","email-label","email-input","phone-label","phone-input","btn"]}}
+{"op":"add","path":"/elements/name-label","value":{"type":"Label","props":{"content":"Name"},"children":[]}}
+{"op":"add","path":"/elements/name-input","value":{"type":"Input","props":{"placeholder":"Your name","value":{"$bindState":"/contact/name"}},"children":[]}}
+{"op":"add","path":"/elements/email-label","value":{"type":"Label","props":{"content":"Email"},"children":[]}}
+{"op":"add","path":"/elements/email-input","value":{"type":"Input","props":{"placeholder":"Email","type":"email","value":{"$bindState":"/contact/email"}},"children":[]}}
+{"op":"add","path":"/elements/phone-label","value":{"type":"Label","props":{"content":"Phone Number"},"children":[]}}
+{"op":"add","path":"/elements/phone-input","value":{"type":"Input","props":{"placeholder":"Phone","value":{"$bindState":"/contact/phone"}},"children":[]}}
+{"op":"add","path":"/elements/btn","value":{"type":"Button","props":{"label":"Submit"},"children":[]}}
+{"op":"add","path":"/state/contact","value":{"name":"","email":"","phone":""}}
+
+Build the UI by adding /root first, then each element. For edits, use replace/remove/move/copy as needed.`
   const messages = modelMessages.map((m) => ({ role: m.role, content: m.content }))
 
   let model: ReturnType<typeof createOpenAI> extends (id: string, opts?: unknown) => infer R ? R : never
