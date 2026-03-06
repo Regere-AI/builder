@@ -342,9 +342,9 @@ export async function launchpadLogin(
   return { sessionToken: res.sessionToken }
 }
 
-/** Launchpad health check (GET /health - Architect SDK health check). Returns true if healthy. */
+/** Launchpad health check (GET /launchpad/api/v1/health). Returns true if healthy. */
 export async function launchpadHealthCheck(baseUrl: string): Promise<boolean> {
-  const url = baseUrl.replace(/\/$/, '') + '/health'
+  const url = baseUrl.replace(/\/$/, '') + '/launchpad/api/v1/health'
   const res = await fetch(url, { method: 'GET' })
   return res.ok
 }
@@ -415,21 +415,23 @@ export async function launchpadLogout(baseUrl: string, sessionToken: string): Pr
   })
 }
 
-/** Fetch OpenAPI spec for a service (GET /proxy/{slug}/spec). Calls Rust backend. */
+/** Fetch OpenAPI spec for a service (GET /proxy/{slug}/spec or /api/v1/spec). Calls Rust backend. */
 export async function launchpadGetServiceSpec(
   baseUrl: string,
   slug: string,
-  sessionToken: string
+  sessionToken: string,
+  tenant?: string
 ): Promise<object> {
+  const tenantId = tenant ?? getLaunchpadSession()?.tenant ?? ''
   if (!isTauri()) {
     const base = baseUrl.replace(/\/$/, '')
     const s = slug.trim()
     const url = s === '' || s.toLowerCase() === 'launchpad'
-      ? `${base}/spec`
+      ? `${base}/launchpad/api/v1/spec`
       : `${base}/proxy/${encodeURIComponent(s)}/spec`
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${sessionToken}` },
-    })
+    const headers: Record<string, string> = { Authorization: `Bearer ${sessionToken}` }
+    if (tenantId) headers['X-Tenant-ID'] = tenantId
+    const res = await fetch(url, { headers })
     if (!res.ok) throw new Error(`Failed to load spec: ${res.status} ${res.statusText}`)
     return res.json()
   }
@@ -437,6 +439,7 @@ export async function launchpadGetServiceSpec(
     baseUrl: baseUrl.replace(/\/$/, ''),
     slug: slug.trim(),
     sessionToken,
+    tenant: tenantId,
   })
 }
 
@@ -446,6 +449,8 @@ export interface LaunchpadSession {
   launchpadId: string
   url: string
   token: string
+  /** Tenant ID for X-Tenant-ID header on launchpad API requests. */
+  tenant?: string
 }
 
 export function setLaunchpadSession(session: LaunchpadSession): void {

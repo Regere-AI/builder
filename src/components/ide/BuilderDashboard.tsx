@@ -926,6 +926,20 @@ export function BuilderDashboard({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [activeFile, isJsonFile, isWorkflowFile])
 
+  // Cmd+W / Ctrl+W → close active tab (except Settings)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'w' || e.altKey || e.shiftKey) return
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+      if (!activeFile || activeFile.path === SETTINGS_TAB_PATH) return
+      e.preventDefault()
+      handleFileClose(activeFile)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [activeFile])
+
   return (
     <div className="flex-1 bg-[#1e1e1e] flex flex-col overflow-hidden">
       {/* Editor Tabs */}

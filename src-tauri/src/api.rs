@@ -1022,18 +1022,21 @@ pub async fn launchpad_get_service_spec(
     base_url: String,
     slug: String,
     session_token: String,
+    tenant: String,
 ) -> Result<serde_json::Value, String> {
     let base = base_url.trim_end_matches('/');
     let slug = slug.trim();
     let url = if slug.is_empty() || slug.eq_ignore_ascii_case("launchpad") {
-        format!("{}/spec", base)
+        format!("{}/launchpad/api/v1/spec", base)
     } else {
         format!("{}/proxy/{}/spec", base, slug)
     };
     let client = Client::new();
-    let res = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", session_token))
+    let mut req = client.get(&url).header("Authorization", format!("Bearer {}", session_token));
+    if !tenant.is_empty() {
+        req = req.header("X-Tenant-ID", tenant.as_str());
+    }
+    let res = req
         .send()
         .await
         .map_err(|e| format!("Spec request failed: {}", map_reqwest_error(e, "Request failed")))?;

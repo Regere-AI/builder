@@ -147,7 +147,7 @@ export function LaunchpadSelectPage({ user, onGetIn, onLogout }: LaunchpadSelect
     setConnectError(null)
     try {
       const { sessionToken } = await launchpadLogin(config.url, tenantId, config.email, password)
-      setLaunchpadSession({ launchpadId: full.id, url: full.url, token: sessionToken })
+      setLaunchpadSession({ launchpadId: full.id, url: full.url, token: sessionToken, tenant: config.tenant ?? '' })
       closeConnectDialog()
       onGetIn(full)
     } catch (e) {
