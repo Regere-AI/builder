@@ -823,3 +823,238 @@ pub async fn api_agent_health() -> Result<serde_json::Value, String> {
     }
     serde_json::from_str(&text).map_err(|e| format!("Invalid health response: {}", e))
 }
+
+// ---------- Launchpad: GET /api/v1/services (service registry) ----------
+
+#[tauri::command]
+pub async fn launchpad_get_services(
+    base_url: String,
+    session_token: Option<String>,
+    tenant: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    let base = base_url.trim_end_matches('/');
+    let url = format!("{}/api/v1/services", base);
+    let client = Client::new();
+    let mut req = client.get(&url).header("X-Tenant-ID", tenant.as_str());
+    if let Some(token) = session_token {
+        if !token.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+    }
+    let res = req
+        .send()
+        .await
+        .map_err(|e| format!("Services request failed: {}", map_reqwest_error(e, "Request failed")))?;
+    let status = res.status();
+    let text = res
+        .text()
+        .await
+        .map_err(|e| format!("Services response read failed: {}", map_reqwest_error(e, "Read failed")))?;
+    if !status.is_success() {
+        let message: String = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|j| {
+                j.get("message")
+                    .or(j.get("error"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| text.chars().take(200).collect::<String>());
+        return Err(format!("Services failed ({}): {}", status, message));
+    }
+    let data: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Invalid services JSON: {}", e))?;
+    let list = if let Some(arr) = data.as_array() {
+        arr.clone()
+    } else if let Some(arr) = data.get("data").and_then(|v| v.as_array()) {
+        arr.clone()
+    } else if let Some(arr) = data.get("services").and_then(|v| v.as_array()) {
+        arr.clone()
+    } else {
+        vec![]
+    };
+    Ok(list)
+}
+
+// ---------- Launchpad: POST /api/v1/services (register new service) ----------
+
+#[tauri::command]
+pub async fn launchpad_register_service(
+    base_url: String,
+    session_token: String,
+    tenant: String,
+    slug: String,
+    name: String,
+    service_base_url: String,
+    service_type: String,
+    docker_image: Option<String>,
+    tag: Option<String>,
+) -> Result<(), String> {
+    let base = base_url.trim_end_matches('/');
+    let url = format!("{}/api/v1/services", base);
+    let client = Client::new();
+    let mut body = serde_json::json!({
+        "slug": slug.trim(),
+        "name": name.trim(),
+        "baseUrl": service_base_url.trim(),
+        "serviceType": service_type.trim()
+    });
+    if let Some(ref img) = docker_image {
+        let img = img.trim();
+        if !img.is_empty() {
+            body["dockerImage"] = serde_json::Value::String(img.to_string());
+        }
+    }
+    if let Some(ref t) = tag {
+        let t = t.trim();
+        if !t.is_empty() {
+            body["tag"] = serde_json::Value::String(t.to_string());
+        }
+    }
+    let res = client
+        .post(&url)
+        .header("X-Tenant-ID", tenant.as_str())
+        .header("Authorization", format!("Bearer {}", session_token))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Register service request failed: {}", map_reqwest_error(e, "Request failed")))?;
+    let status = res.status();
+    let text = res
+        .text()
+        .await
+        .map_err(|e| format!("Register service response read failed: {}", map_reqwest_error(e, "Read failed")))?;
+    if !status.is_success() {
+        let message: String = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|j| {
+                j.get("message")
+                    .or(j.get("error"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| text.chars().take(200).collect::<String>());
+        return Err(format!("Register service failed ({}): {}", status, message));
+    }
+    Ok(())
+}
+
+// ---------- Launchpad: POST /proxy/authrs/login/email-password ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchpadLoginResponse {
+    #[serde(rename = "sessionToken")]
+    pub session_token: String,
+}
+
+#[tauri::command]
+pub async fn launchpad_login(
+    base_url: String,
+    tenant: String,
+    email: String,
+    password: String,
+) -> Result<LaunchpadLoginResponse, String> {
+    let base = base_url.trim_end_matches('/');
+    let url = format!("{}/proxy/authrs/login/email-password", base);
+    let client = Client::new();
+    let body = serde_json::json!({ "email": email, "password": password });
+    let res = client
+        .post(&url)
+        .header("X-Tenant-ID", tenant.as_str())
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Login request failed: {}", map_reqwest_error(e, "Request failed")))?;
+    let status = res.status();
+    let text = res
+        .text()
+        .await
+        .map_err(|e| format!("Login response read failed: {}", map_reqwest_error(e, "Read failed")))?;
+    if !status.is_success() {
+        let message: String = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|j| {
+                j.get("message")
+                    .or(j.get("error"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| text.chars().take(200).collect::<String>());
+        return Err(format!("Login failed ({}): {}", status, message));
+    }
+    let data: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Invalid login JSON: {}", e))?;
+    let session_token = data
+        .get("sessionToken")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Login succeeded but no session token returned".to_string())?;
+    Ok(LaunchpadLoginResponse {
+        session_token: session_token.to_string(),
+    })
+}
+
+// ---------- Launchpad: POST /proxy/authrs/session/logout ----------
+
+#[tauri::command]
+pub async fn launchpad_logout(base_url: String, session_token: String) -> Result<(), String> {
+    let base = base_url.trim_end_matches('/');
+    let url = format!("{}/proxy/authrs/session/logout", base);
+    let client = Client::new();
+    let res = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", session_token))
+        .send()
+        .await
+        .map_err(|e| format!("Logout request failed: {}", map_reqwest_error(e, "Request failed")))?;
+    // Best-effort: don't fail the app if logout returns non-2xx (session may already be invalid)
+    if !res.status().is_success() {
+        let _ = res.text().await;
+    }
+    Ok(())
+}
+
+// ---------- Launchpad: GET /proxy/{slug}/spec (OpenAPI spec for a service) ----------
+
+#[tauri::command]
+pub async fn launchpad_get_service_spec(
+    base_url: String,
+    slug: String,
+    session_token: String,
+) -> Result<serde_json::Value, String> {
+    let base = base_url.trim_end_matches('/');
+    let slug = slug.trim();
+    let url = if slug.is_empty() || slug.eq_ignore_ascii_case("launchpad") {
+        format!("{}/spec", base)
+    } else {
+        format!("{}/proxy/{}/spec", base, slug)
+    };
+    let client = Client::new();
+    let res = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", session_token))
+        .send()
+        .await
+        .map_err(|e| format!("Spec request failed: {}", map_reqwest_error(e, "Request failed")))?;
+    let status = res.status();
+    let text = res
+        .text()
+        .await
+        .map_err(|e| format!("Spec response read failed: {}", map_reqwest_error(e, "Read failed")))?;
+    if !status.is_success() {
+        let message: String = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|j| {
+                j.get("message")
+                    .or(j.get("error"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| text.chars().take(200).collect::<String>());
+        return Err(format!("Spec failed ({}): {}", status, message));
+    }
+    let spec: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Invalid spec JSON: {}", e))?;
+    Ok(spec)
+}

@@ -29,6 +29,7 @@
     "@types/node": "^20.10.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/swagger-ui-react": "^5.18.0",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.24",
     "concurrently": "^9.1.2",
@@ -67,7 +68,10 @@
     "lucide-react": "^0.563.0",
     "monaco-editor": "^0.45.0",
     "react-arborist": "^3.4.3",
+    "react-select": "^5.10.2",
+    "swagger-ui-react": "^5.32.0",
     "tailwind-merge": "^3.4.0",
+    "yaml": "^2.8.2",
     "zod": "^4.0.0",
     "zustand": "^5.0.0"
   },

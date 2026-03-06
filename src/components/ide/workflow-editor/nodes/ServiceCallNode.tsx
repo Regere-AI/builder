@@ -6,6 +6,8 @@ export const SERVICE_CALL_NODE_TYPE = 'serviceCall'
 export type ServiceCallNodeData = {
   label?: string
   serviceName?: string
+  /** Launchpad service slug (for spec fetch and display). */
+  serviceSlug?: string
   operation?: string
   method?: string
   path?: string
