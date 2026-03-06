@@ -47,14 +47,14 @@ export const catalog = defineCatalog(schema, {
         size: z.enum(['default', 'sm', 'lg', 'icon']).nullable().optional(),
         disabled: z.boolean().nullable().optional(),
       }),
-      description: 'Clickable button; use emit("press") for click',
+      description: 'Clickable button. Use on: { press: { action: "setState", params: { statePath: "/path", value: ... } } } so the State panel shows actions; add /state/<path> for any state that buttons or actions update.',
     },
     Text: {
       props: z.object({
         content: z.string(),
         className: z.string().nullable().optional(),
       }),
-      description: 'Text paragraph or label',
+      description: 'Static text or paragraph only. Do NOT use for form data entry; use Input for any field where the user types.',
     },
     Input: {
       props: z.object({
@@ -63,14 +63,14 @@ export const catalog = defineCatalog(schema, {
         type: z.enum(['text', 'password', 'email', 'number']).nullable().optional(),
         disabled: z.boolean().nullable().optional(),
       }),
-      description: 'Text input field; use $bindState on value for two-way binding',
+      description: 'Editable text field for user input. Use Input (not Label or Text) for every form field where the user must type: name, email, phone, etc. Use $bindState on value to bind to state (e.g. /form/name).',
     },
     Label: {
       props: z.object({
         content: z.string(),
         htmlFor: z.string().nullable().optional(),
       }),
-      description: 'Form label',
+      description: 'Optional label text displayed above or beside a form control. For data entry fields always add an Input; Label alone does not allow typing.',
     },
     Checkbox: {
       props: z.object({
@@ -117,6 +117,20 @@ export const catalog = defineCatalog(schema, {
     },
   },
   actions: {
+    setState: {
+      params: z.object({
+        statePath: z.string().describe('JSON Pointer path, e.g. /ui/lastAction or /form/submitted'),
+        value: z.unknown().optional().describe('Value to set; omit to clear'),
+      }),
+      description: 'Write a value to state at the given path so the State panel reflects it. Use for button clicks, form submitted, etc.',
+    },
+    trackPress: {
+      params: z.object({
+        id: z.string().optional().describe('Element id (e.g. btn, save-btn)'),
+        label: z.string().optional().describe('Button or control label for display in State panel'),
+      }),
+      description: 'Record a button or control press in state at /ui/lastAction so the State panel shows the last action.',
+    },
     submit: {
       params: z.object({ formId: z.string().optional() }),
       description: 'Submit a form',
@@ -127,7 +141,13 @@ export const catalog = defineCatalog(schema, {
     },
     press: {
       params: z.object({}),
-      description: 'Button or control pressed',
+      description: 'Button or control pressed (no state update); prefer setState or trackPress to show in State panel.',
+    },
+    ask: {
+      params: z.object({
+        question: z.string().describe('Strategic or business question (e.g. technology foundation, cloud, security, compliance)'),
+      }),
+      description: 'Submit a strategic or business question; stores question and response in state for display (e.g. /prompt/question, /prompt/response)',
     },
   },
 })

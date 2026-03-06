@@ -1,5 +1,6 @@
 import { defineRegistry, useBoundProp } from '@json-render/react'
 import { catalog } from './catalog'
+import { getJsonRenderState, setJsonRenderState, setValueAtPath } from './zustand-store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -9,8 +10,9 @@ import { cn } from '@/lib/utils'
 /**
  * React component registry for json-render: maps catalog types to UI components.
  * Use with <Renderer spec={spec} registry={registry} />.
+ * Use handlers(getSetState, getState) for <ActionProvider handlers={...} /> with the Zustand store.
  */
-export const { registry } = defineRegistry(catalog, {
+export const { registry, handlers } = defineRegistry(catalog, {
   components: {
     Card: ({ props, children }) => (
       <div
@@ -91,7 +93,9 @@ export const { registry } = defineRegistry(catalog, {
                 ? 'flex-end'
                 : props.align === 'center'
                   ? 'center'
-                  : 'stretch',
+                  : props.align === 'stretch'
+                    ? 'stretch'
+                    : 'flex-start',
           justifyContent:
             props.justify === 'start'
               ? 'flex-start'
@@ -156,12 +160,90 @@ export const { registry } = defineRegistry(catalog, {
     ),
   },
   actions: {
-    submit: async (params) => {
-      console.log('Action submit', params)
+    setState: async (params, setState) => {
+      const path = (params as { statePath?: string }).statePath
+      const value = (params as { value?: unknown }).value
+      if (path) {
+        setState?.((prev) => setValueAtPath(prev, path, value))
+      }
+    },
+    trackPress: async (params, setState) => {
+      const id = (params as { id?: string }).id ?? ''
+      const label = (params as { label?: string }).label ?? ''
+      setState?.((prev) => {
+        const prevUi = typeof prev?.ui === 'object' && prev.ui !== null ? (prev.ui as Record<string, unknown>) : {}
+        const prevButtons = typeof prevUi.buttons === 'object' && prevUi.buttons !== null ? (prevUi.buttons as Record<string, boolean>) : {}
+        return {
+          ...prev,
+          ui: {
+            ...prevUi,
+            lastAction: id,
+            lastActionLabel: label,
+            lastAt: Date.now(),
+            buttons: { ...prevButtons, ...(id ? { [id]: true } : {}) },
+          },
+        }
+      })
+    },
+    submit: async (params, setState) => {
+      setState?.((prev) => ({ ...prev, formResult: { submitted: true, formId: (params as { formId?: string }).formId } }))
     },
     navigate: async (params) => {
-      if (typeof window !== 'undefined' && params?.url) window.open(params.url as string, '_blank')
+      if (typeof window !== 'undefined' && (params as { url?: string })?.url) {
+        window.open((params as { url: string }).url, '_blank')
+      }
     },
     press: async () => {},
+    ask: async (params, setState) => {
+      const question = (params as { question?: string }).question ?? ''
+      setState?.((prev) => ({
+        ...prev,
+        prompt: {
+          ...(typeof prev?.prompt === 'object' && prev.prompt !== null ? (prev.prompt as Record<string, unknown>) : {}),
+          question,
+          response: 'Received. In a full setup this would call your API and return a comprehensive answer (e.g. on cloud strategy, cybersecurity, data governance, disaster recovery, compliance).',
+        },
+      }))
+    },
   },
 })
+
+const baseHandlers = handlers(() => setJsonRenderState, () => getJsonRenderState())
+
+/**
+ * Wrap all action handlers so every invocation is recorded in state.ui (lastAction, actionLog).
+ * So the State panel shows actions from any UI element dynamically, not just those wired in the JSON.
+ */
+function wrapHandlersToRecordActions(
+  h: Record<string, (params: unknown, setState?: (u: (p: Record<string, unknown>) => Record<string, unknown>) => void) => Promise<void>>
+): typeof h {
+  const wrapped = { ...h }
+  for (const [actionName, fn] of Object.entries(wrapped)) {
+    if (typeof fn !== 'function') continue
+    wrapped[actionName] = async (params, setState) => {
+      setState?.((prev) => {
+        const prevUi = typeof prev?.ui === 'object' && prev.ui !== null ? (prev.ui as Record<string, unknown>) : {}
+        const log = Array.isArray(prevUi.actionLog) ? (prevUi.actionLog as unknown[]).slice(-49) : []
+        log.push({ action: actionName, params, at: Date.now() })
+        const elementId = params && typeof params === 'object' && 'id' in params ? (params as { id?: string }).id : undefined
+        const prevButtons = typeof prevUi.buttons === 'object' && prevUi.buttons !== null ? (prevUi.buttons as Record<string, boolean>) : {}
+        return {
+          ...prev,
+          ui: {
+            ...prevUi,
+            lastAction: actionName,
+            lastParams: params,
+            lastAt: Date.now(),
+            actionLog: log,
+            buttons: { ...prevButtons, ...(elementId ? { [elementId]: true } : {}) },
+          },
+        }
+      })
+      return fn(params, setState)
+    }
+  }
+  return wrapped
+}
+
+/** ActionProvider-compatible handlers backed by the Zustand StateStore; all invocations are recorded in state.ui. */
+export const jsonRenderActionHandlers = wrapHandlersToRecordActions(baseHandlers)
