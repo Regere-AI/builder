@@ -2,6 +2,14 @@ import { useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import type { Node } from '@xyflow/react'
 import { Settings2, Globe, Send, Server, Maximize2, X } from 'lucide-react'
+import Select from 'react-select'
+import {
+  getLaunchpadSession,
+  launchpadGetServices,
+  launchpadGetServiceSpec,
+  type LaunchpadService,
+} from '@/services/api'
+import { parseOpenApiPaths, type OpenApiOperation } from '@/lib/openapi-paths'
 import {
   HTTP_TRIGGER_NODE_TYPE,
   type HttpTriggerNodeData,
@@ -545,6 +553,47 @@ function HttpTriggerFields({
   )
 }
 
+const reactSelectDarkStyles = {
+  control: (base: Record<string, unknown>, state: { isFocused?: boolean }) => ({
+    ...base,
+    minHeight: 36,
+    backgroundColor: '#1e1e1e',
+    borderColor: state.isFocused ? 'rgba(139, 92, 246, 0.6)' : '#3e3e3e',
+    boxShadow: state.isFocused ? '0 0 0 1px rgba(139, 92, 246, 0.3)' : 'none',
+  }),
+  menu: (base: Record<string, unknown>) => ({
+    ...base,
+    backgroundColor: '#252526',
+    border: '1px solid #3e3e3e',
+  }),
+  option: (base: Record<string, unknown>, state: { isFocused?: boolean; isSelected?: boolean }) => ({
+    ...base,
+    backgroundColor: state.isSelected ? 'rgba(139, 92, 246, 0.3)' : state.isFocused ? '#3e3e3e' : 'transparent',
+    color: '#e0e0e0',
+  }),
+  singleValue: (base: Record<string, unknown>) => ({ ...base, color: '#e0e0e0' }),
+  input: (base: Record<string, unknown>) => ({ ...base, color: '#e0e0e0' }),
+  placeholder: (base: Record<string, unknown>) => ({ ...base, color: '#6b7280' }),
+}
+
+function MethodBadge({ method }: { method: string }) {
+  const colors: Record<string, string> = {
+    GET: 'bg-emerald-600/80 text-white',
+    POST: 'bg-sky-600/80 text-white',
+    PUT: 'bg-amber-600/80 text-white',
+    PATCH: 'bg-violet-600/80 text-white',
+    DELETE: 'bg-red-600/80 text-white',
+    HEAD: 'bg-gray-600/80 text-white',
+    OPTIONS: 'bg-gray-500/80 text-white',
+  }
+  const cls = colors[method] ?? 'bg-gray-600/80 text-white'
+  return (
+    <span className={`mr-2 inline-flex shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${cls}`}>
+      {method}
+    </span>
+  )
+}
+
 function ServiceCallFields({
   data,
   onChange,
@@ -555,36 +604,116 @@ function ServiceCallFields({
   nodeSuggestions?: string[]
 }) {
   const [fullEditorOpen, setFullEditorOpen] = useState(false)
+  const [services, setServices] = useState<LaunchpadService[]>([])
+  const [servicesLoading, setServicesLoading] = useState(false)
+  const [apiOperations, setApiOperations] = useState<OpenApiOperation[]>([])
+  const [specLoading, setSpecLoading] = useState(false)
+
+  const session = getLaunchpadSession()
+  useEffect(() => {
+    if (!session?.url) {
+      setServices([])
+      return
+    }
+    setServicesLoading(true)
+    launchpadGetServices(session.url, {
+      sessionToken: session.token,
+      tenant: '',
+    })
+      .then(setServices)
+      .catch(() => setServices([]))
+      .finally(() => setServicesLoading(false))
+  }, [session?.url, session?.token])
+
+  const serviceSlug = (data.serviceSlug as string) ?? (data.serviceName as string) ?? ''
+  useEffect(() => {
+    if (!session?.url || !serviceSlug) {
+      setApiOperations([])
+      return
+    }
+    setSpecLoading(true)
+    launchpadGetServiceSpec(session.url, serviceSlug, session.token)
+      .then((spec) => setApiOperations(parseOpenApiPaths(spec)))
+      .catch(() => setApiOperations([]))
+      .finally(() => setSpecLoading(false))
+  }, [session?.url, session?.token, serviceSlug])
+
   const method = (data.method as string) ?? 'POST'
   const showRawBody = BODY_METHODS.includes(method as (typeof BODY_METHODS)[number])
   const rawBodyValue = typeof data.rawBody === 'string' ? data.rawBody : ''
+
+  const serviceOptions = services
+    .map((s) => ({
+      value: (s.slug ?? s.name ?? '').toString(),
+      label: (s.name ?? s.slug ?? 'Unknown').toString(),
+    }))
+    .filter((o) => o.value)
+  const selectedServiceOption = serviceOptions.find((o) => o.value === serviceSlug) ?? null
+
+  const apiOptions = apiOperations.map((op) => ({
+    value: `${op.method}:${op.path}`,
+    label: op.path,
+    method: op.method,
+    operationId: op.operationId,
+  }))
+  const currentPath = (data.path as string) ?? ''
+  const selectedApiOption =
+    apiOptions.find((o) => o.method === method && o.label === currentPath) ??
+    (currentPath && method ? { value: `${method}:${currentPath}`, label: currentPath, method, operationId: undefined as string | undefined } : null)
 
   return (
     <div className="space-y-4">
       <div>
         <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">
-          Method
+          Service
         </label>
-        <select
-          value={method}
-          onChange={(e) => onChange({ method: e.target.value })}
-          className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-sm text-gray-200 outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/30"
-        >
-          {HTTP_METHODS.map((m) => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </select>
+        <Select<{ value: string; label: string }>
+          isSearchable
+          options={serviceOptions}
+          value={selectedServiceOption}
+          onChange={(opt) => {
+            const s = services.find((sv) => (sv.slug ?? sv.name) === opt?.value)
+            onChange({
+              serviceSlug: opt?.value ?? '',
+              serviceName: s?.name ?? opt?.label ?? '',
+            })
+          }}
+          isLoading={servicesLoading}
+          placeholder={servicesLoading ? 'Loading…' : 'Select a service'}
+          isClearable
+          styles={reactSelectDarkStyles}
+          classNamePrefix="workflow-select"
+        />
       </div>
       <div>
         <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">
-          Path
+          API (from spec)
         </label>
-        <input
-          type="text"
-          value={(data.path as string) ?? ''}
-          onChange={(e) => onChange({ path: e.target.value.toLowerCase() })}
-          placeholder="e.g. /webhook or uuid"
-          className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/30"
+        <Select<{ value: string; label: string; method: string; operationId?: string }>
+          isSearchable
+          options={apiOptions}
+          value={selectedApiOption}
+          onChange={(opt) => {
+            if (opt) {
+              onChange({
+                method: opt.method,
+                path: opt.label,
+                operation: opt.operationId ?? undefined,
+              })
+            }
+          }}
+          isLoading={specLoading}
+          placeholder={specLoading ? 'Loading…' : serviceSlug ? 'Select an API' : 'Select a service first'}
+          isClearable
+          isDisabled={!serviceSlug}
+          formatOptionLabel={(option) => (
+            <span className="flex items-center">
+              <MethodBadge method={option.method} />
+              <span className="truncate">{option.label}</span>
+            </span>
+          )}
+          styles={reactSelectDarkStyles}
+          classNamePrefix="workflow-select"
         />
       </div>
       <div>
