@@ -9,8 +9,8 @@ import { ApiSpecViewer } from './ApiSpecViewer'
 import type { Spec } from '@json-render/core'
 import { Renderer, JSONUIProvider } from '@json-render/react'
 import { registry, jsonRenderActionHandlers } from '@/lib/json-render/registry'
-import { jsonRenderStateStore } from '@/lib/json-render/zustand-store'
-import { parseToSpec, isJsonRenderSpec } from '@/lib/json-render/layout-to-spec'
+import { jsonRenderStateStore, seedStateFromSpec } from '@/lib/json-render/zustand-store'
+import { parseToSpec, isJsonRenderSpec, attachOrphanElementsToRoot, injectDefaultActions, type JsonRenderSpec } from '@/lib/json-render/layout-to-spec'
 import { StateDebugPane } from './StateDebugPane'
 
 export const SETTINGS_TAB_PATH = 'builder://settings'
@@ -51,7 +51,7 @@ import { Menu, Submenu, MenuItem, PredefinedMenuItem, CheckMenuItem } from '@tau
 import { listen } from '@tauri-apps/api/event'
 import { exit } from '@tauri-apps/plugin-process'
 
-interface BuilderDashboardProps {
+export interface BuilderDashboardProps {
   user: {
     firstName: string
     lastName: string
@@ -65,6 +65,8 @@ interface BuilderDashboardProps {
   onAppFilesChanged?: () => void
   onAgentResponseProcessed?: () => void
   agentResponse?: AgentResponsePayload
+  /** Live spec while chat is streaming (show progressive UI in Preview). */
+  liveStreamingSpec?: Spec | null
   /** When user adds selection to chat (e.g. Ctrl+L), open panel and set context. */
   onAddSelectionToChat?: (payload: EditorSelectionPayload) => void
   /** Incremented when files change on disk (notify watcher) so we can refresh git diff. */
@@ -83,6 +85,7 @@ export function BuilderDashboard({
   onAppFilesChanged,
   onAgentResponseProcessed,
   agentResponse,
+  liveStreamingSpec,
   onAddSelectionToChat,
   fileChangeTrigger,
   reloadOpenFilesTrigger,
@@ -863,13 +866,36 @@ export function BuilderDashboard({
       : null
   const layoutSpec = layoutSpecFromFile ?? generatedSpecFromAgent
   const isGeneratedJson = agentResponse?.content?.filePath === 'uiConfigs/generated.json'
+  /** When chat is streaming, show progressive UI in Preview; prefer live spec over file spec. */
+  const previewSpec = liveStreamingSpec ?? layoutSpec
+  /** Attach orphans to root; inject default on.press for interactive elements so State panel shows all actions. */
+  const specForPreview =
+    previewSpec && isJsonRenderSpec(previewSpec)
+      ? injectDefaultActions(attachOrphanElementsToRoot(previewSpec as JsonRenderSpec))
+      : previewSpec
   const showLayoutPreview =
-    !!layoutSpec &&
-    (showPreview && isLayoutJsonFile ? true : agentResponse?.type === 'code' && !!isGeneratedJson)
+    !!specForPreview &&
+    (liveStreamingSpec != null ? true : showPreview && isLayoutJsonFile ? true : agentResponse?.type === 'code' && !!isGeneratedJson)
+
+  // Seed store from spec.state so State panel and $bindState show correct data; merge-only so user input is preserved
+  useEffect(() => {
+    if (specForPreview && typeof specForPreview === 'object') seedStateFromSpec(specForPreview as { state?: Record<string, unknown> })
+  }, [specForPreview])
+
+  // Key so Renderer re-mounts when spec structure changes (fixes stale preview after modifications)
+  const previewSpecKey =
+    specForPreview && typeof specForPreview === 'object'
+      ? `${(specForPreview as Spec).root ?? ''}-${Object.keys((specForPreview as Spec).elements ?? {}).length}`
+      : ''
 
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC')
   const configShortcut = isMac ? '⌘1' : 'Ctrl+1'
   const previewShortcut = isMac ? '⌘2' : 'Ctrl+2'
+
+  // When chat is streaming, show Preview by default so progressive UI is visible
+  useEffect(() => {
+    if (liveStreamingSpec != null) setShowPreview(true)
+  }, [liveStreamingSpec])
 
   // Workflow: show editor by default; ensure preview is off when switching to workflow
   useEffect(() => {
@@ -981,19 +1007,32 @@ export function BuilderDashboard({
               <ApiSpecViewer slug={apiSpecParams.slug} launchpadUrl={apiSpecParams.launchpadUrl} />
             </div>
           ) : null
-        })() ?? (activeFile?.path === SETTINGS_TAB_PATH ? (
+        })() ?? (liveStreamingSpec != null && showLayoutPreview ? (
+          <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e] flex flex-col gap-4">
+            <p className="text-xs text-gray-500">Preview (streaming…)</p>
+            <div className="min-h-0 flex-1 rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
+              <JSONUIProvider registry={registry} store={jsonRenderStateStore} handlers={jsonRenderActionHandlers}>
+                <Renderer key={previewSpecKey} spec={specForPreview as Spec} registry={registry} loading={true} />
+              </JSONUIProvider>
+            </div>
+            <StateDebugPane defaultCollapsed label="State" />
+          </div>
+        ) : null) ?? (activeFile?.path === SETTINGS_TAB_PATH ? (
           <BuilderSettingsView user={user} />
         ) : activeFile ? (
           showLayoutPreview ? (
             <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e] flex flex-col gap-4">
+              {liveStreamingSpec != null && (
+                <p className="text-xs text-gray-500">Preview (streaming…)</p>
+              )}
               <div className="min-h-0 flex-1 rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
                 <JSONUIProvider registry={registry} store={jsonRenderStateStore} handlers={jsonRenderActionHandlers}>
-                  <Renderer spec={layoutSpec as Spec} registry={registry} />
+                  <Renderer key={previewSpecKey} spec={specForPreview as Spec} registry={registry} loading={liveStreamingSpec != null} />
                 </JSONUIProvider>
               </div>
               <StateDebugPane defaultCollapsed label="State" />
             </div>
-          ) : layoutSpec === null && showPreview && isLayoutJsonFile ? (
+          ) : specForPreview === null && showPreview && isLayoutJsonFile ? (
             <div className="flex-1 flex items-center justify-center p-8 text-gray-400">
               Invalid layout JSON. Ensure the file has a root object with a <code className="bg-[#3e3e3e] px-1 rounded">type</code> field.
             </div>

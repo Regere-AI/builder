@@ -11,8 +11,11 @@ export interface LayoutNode {
 
 export interface JsonRenderSpec {
   root: string
-  elements: Record<string, { type: string; props: Record<string, unknown>; children?: string[] }>
+  elements: Record<string, { type: string; props: Record<string, unknown>; children?: string[]; on?: Record<string, unknown> }>
 }
+
+/** Component types that can emit press/change; we inject default on.press so actions show in State panel. */
+const INTERACTIVE_TYPES = new Set(['Button', 'Checkbox'])
 
 let idCounter = 0
 function nextId(prefix: string): string {
@@ -135,6 +138,78 @@ export function ensureSpecHasRoot(spec: Record<string, unknown>): JsonRenderSpec
     root = keys[0]
   }
   return { root, elements: elements as JsonRenderSpec['elements'] }
+}
+
+/**
+ * Returns the set of element keys reachable from root by following children.
+ */
+function reachableFromRoot(
+  rootKey: string,
+  elements: Record<string, { children?: string[] }>
+): Set<string> {
+  const seen = new Set<string>()
+  const queue = [rootKey]
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    if (seen.has(id)) continue
+    seen.add(id)
+    const el = elements[id]
+    if (el?.children) for (const c of el.children) queue.push(c)
+  }
+  return seen
+}
+
+/**
+ * When the model adds new elements but forgets to update the parent's children array,
+ * those elements exist in spec.elements but are never rendered (orphans).
+ * This returns a new spec with orphan element ids appended to the root element's children
+ * so they appear in the preview (e.g. "Save" and "Cancel" buttons added by a refinement).
+ */
+export function attachOrphanElementsToRoot(spec: JsonRenderSpec): JsonRenderSpec {
+  const { root, elements } = spec
+  if (!root || !elements || typeof elements !== 'object') return spec
+  const reachable = reachableFromRoot(root, elements as Record<string, { children?: string[] }>)
+  const orphanIds = Object.keys(elements).filter((id) => id !== root && !reachable.has(id))
+  if (orphanIds.length === 0) return spec
+  const rootEl = elements[root]
+  if (!rootEl) return spec
+  const existingChildren = Array.isArray(rootEl.children) ? rootEl.children : []
+  const newChildren = [...existingChildren]
+  for (const id of orphanIds) {
+    if (!newChildren.includes(id)) newChildren.push(id)
+  }
+  if (newChildren.length === existingChildren.length) return spec
+  const newElements = { ...elements }
+  newElements[root] = { ...rootEl, children: newChildren }
+  return { root, elements: newElements }
+}
+
+/**
+ * Inject default on.press (trackPress) for interactive elements that don't have one.
+ * So every Button/Checkbox (and any catalog interactive type) records to the State panel
+ * when clicked, without requiring the JSON to wire them. Works for any UI element from catalog
+ * or external spec.
+ */
+export function injectDefaultActions(spec: JsonRenderSpec): JsonRenderSpec {
+  if (!spec.elements || typeof spec.elements !== 'object') return spec
+  const newElements = { ...spec.elements }
+  let changed = false
+  for (const [id, el] of Object.entries(newElements)) {
+    if (!el || typeof el !== 'object' || !INTERACTIVE_TYPES.has(el.type)) continue
+    const hasPress = el.on && typeof (el.on as Record<string, unknown>).press === 'object'
+    if (hasPress) continue
+    const label = (el.props?.label ?? el.props?.content ?? id) as string
+    const existingOn = (el.on && typeof el.on === 'object' ? { ...(el.on as object) } : {}) as Record<string, unknown>
+    newElements[id] = {
+      ...el,
+      on: {
+        ...existingOn,
+        press: { action: 'trackPress', params: { id, label } },
+      },
+    }
+    changed = true
+  }
+  return changed ? { root: spec.root, elements: newElements } : spec
 }
 
 /**

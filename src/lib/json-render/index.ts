@@ -35,6 +35,8 @@ export {
   layoutNodeToSpec,
   isJsonRenderSpec,
   parseToSpec,
+  attachOrphanElementsToRoot,
+  injectDefaultActions,
   type LayoutNode,
   type JsonRenderSpec,
 } from './layout-to-spec'

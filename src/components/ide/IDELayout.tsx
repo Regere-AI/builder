@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import type { Spec } from '@json-render/core'
 import { LeftSidebar } from './LeftSidebar'
 import { BuilderDashboard } from './BuilderDashboard'
 import { ChatPanel, type AgentResponsePayload } from './ChatPanel'
@@ -35,6 +36,7 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
   const [chatPanelWidth, setChatPanelWidth] = useState(320)
   const [pendingChatContext, setPendingChatContext] = useState<EditorSelectionPayload | null>(null)
   const [agentResponse, setAgentResponse] = useState<AgentResponsePayload | undefined>(undefined)
+  const [liveStreamingSpec, setLiveStreamingSpec] = useState<Spec | null>(null)
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0)
   const [fileChangeTrigger, setFileChangeTrigger] = useState(0)
   const [reloadOpenFilesTrigger, setReloadOpenFilesTrigger] = useState(0)
@@ -171,6 +173,7 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
         <BuilderDashboard
           user={user}
           agentResponse={agentResponse}
+          liveStreamingSpec={liveStreamingSpec}
           activeProject={activeProject}
           activeApp={activeApp}
           registerOpenFileFromSidebar={(handler) => { openFileFromSidebarHandlerRef.current = handler }}
@@ -193,6 +196,7 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
           appRootPath={activeApp?.rootPath ?? null}
           pendingContext={pendingChatContext}
           onConsumePendingContext={handleConsumePendingContext}
+          onStreamingSpecChange={setLiveStreamingSpec}
         />
       </div>
 

@@ -20,9 +20,9 @@ import {
 } from '@json-render/react'
 import type { Spec } from '@json-render/core'
 import { createSpecStreamCompiler, compileSpecStream } from '@json-render/core'
-import { parseToSpec, isJsonRenderSpec, ensureSpecHasRoot } from '@/lib/json-render/layout-to-spec'
+import { parseToSpec, isJsonRenderSpec, ensureSpecHasRoot, attachOrphanElementsToRoot, injectDefaultActions, type JsonRenderSpec } from '@/lib/json-render/layout-to-spec'
 import { registry, jsonRenderActionHandlers } from '@/lib/json-render/registry'
-import { jsonRenderStateStore } from '@/lib/json-render/zustand-store'
+import { jsonRenderStateStore, seedStateFromSpec } from '@/lib/json-render/zustand-store'
 import { StateDebugPane } from './StateDebugPane'
 
 const MODEL_OPTIONS: { value: BuilderModelId; label: string }[] = [
@@ -88,6 +88,8 @@ interface ChatPanelProps {
   pendingContext?: EditorSelectionPayload | null
   /** Called after pendingContext has been added to attached list. */
   onConsumePendingContext?: () => void
+  /** Called with live spec while streaming (null when done). Used to show progressive UI in Preview tab. */
+  onStreamingSpecChange?: (spec: Spec | null) => void
 }
 
 const MIN_WIDTH = 300
@@ -96,7 +98,7 @@ const DEFAULT_WIDTH = 320
 
 const CHAT_API_URL = getChatApiUrl()
 
-/** Renders a single assistant message: text from parts + optional json-render spec (from parts or live stream). */
+/** Renders a single assistant message. During streaming shows only JSONL text; after stream shows final UI in chat. */
 function AssistantMessageBubble({
   parts,
   liveSpec,
@@ -107,12 +109,25 @@ function AssistantMessageBubble({
   isStreaming: boolean
 }) {
   const { spec, text } = useJsonRenderMessage(parts)
-  const displaySpec = (isStreaming && liveSpec) || spec
   const hasText = text.trim().length > 0
+  // While streaming: show only the JSONL text (no partial UI in chat). Progressive UI is shown in Preview tab.
+  const showRenderer = !isStreaming && ((liveSpec && hasText) || spec)
+  const rawSpec = showRenderer ? (spec || liveSpec) : null
+  // Attach orphans; inject default on.press for interactive elements so State panel shows all actions
+  const displaySpec =
+    rawSpec && isJsonRenderSpec(rawSpec)
+      ? injectDefaultActions(attachOrphanElementsToRoot(rawSpec as JsonRenderSpec))
+      : rawSpec
+
+  // Seed store from spec.state so State panel shows form/action state (same store as Preview)
+  useEffect(() => {
+    if (displaySpec && typeof displaySpec === 'object') seedStateFromSpec(displaySpec as { state?: Record<string, unknown> })
+  }, [displaySpec])
+
   return (
     <div className="flex flex-col gap-2 w-full max-w-[85%]">
       {hasText && (
-        <p className="text-sm text-gray-300 whitespace-pre-wrap break-words">{text}</p>
+        <p className="text-sm text-gray-300 whitespace-pre-wrap break-words font-mono">{text}</p>
       )}
       {isStreaming && !hasText && <p className="text-sm text-gray-500">…</p>}
       {displaySpec && (
@@ -121,7 +136,7 @@ function AssistantMessageBubble({
             <StateProvider store={jsonRenderStateStore}>
               <VisibilityProvider>
                 <ActionProvider handlers={jsonRenderActionHandlers}>
-                  <Renderer spec={displaySpec} registry={registry} loading={isStreaming} />
+                  <Renderer spec={displaySpec as Spec} registry={registry} loading={false} />
                 </ActionProvider>
               </VisibilityProvider>
             </StateProvider>
@@ -133,7 +148,7 @@ function AssistantMessageBubble({
   )
 }
 
-export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentResponse, appRootPath, pendingContext, onConsumePendingContext }: ChatPanelProps) {
+export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentResponse, appRootPath, pendingContext, onConsumePendingContext, onStreamingSpecChange }: ChatPanelProps) {
   const [inputValue, setInputValue] = useState('')
   const [agentMode, setAgentMode] = useState<'Agent' | 'Plan'>('Agent')
   const [selectedModel, setSelectedModel] = useState<BuilderModelId>(() => {
@@ -162,6 +177,10 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
   const [liveStreamingSpec, setLiveStreamingSpec] = useState<Spec | null>(null)
   /** Shown when streaming finishes and generated JSON was written to file. */
   const [uiGeneratedMessage, setUiGeneratedMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    onStreamingSpecChange?.(liveStreamingSpec)
+  }, [liveStreamingSpec, onStreamingSpecChange])
 
   const chatBodyRef = useRef<Record<string, unknown>>(function initBody() {
     const s = getBuilderSettings()

@@ -154,7 +154,7 @@ Output ONLY SpecStream: one JSON object per line. Each line is a single RFC 6902
 Ops: add, remove, replace (need "value"); move, copy (need "from" and "path"); test (need "value").
 Paths: /root, /elements/<id>, /elements/<id>/props, /elements/<id>/children, /state, /state/<path>.
 
-Add /root first, then elements. For forms use Input with value: { "$bindState": "/state/path" } and add /state/<path> for initial values. When the user message includes "CURRENT UI STATE", output only the patches for the requested change.`
+Add /root first, then elements. Bind any editable value with { "$bindState": "/path" } (initial state is inferred). For every Button (and clickable component), add on.press with action "trackPress" and params { "id": "<element-id>", "label": "<button label>" } so the State panel shows the last action; use action "setState" with statePath and value to write custom state. When adding new elements, update the parent's children array. When the user message includes "CURRENT UI STATE", output only the patches for the requested change.`
   const messages = modelMessages.map((m) => ({ role: m.role, content: m.content }))
 
   let model: ReturnType<typeof createOpenAI> extends (id: string, opts?: unknown) => infer R ? R : never

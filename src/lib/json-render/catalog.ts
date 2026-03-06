@@ -47,7 +47,7 @@ export const catalog = defineCatalog(schema, {
         size: z.enum(['default', 'sm', 'lg', 'icon']).nullable().optional(),
         disabled: z.boolean().nullable().optional(),
       }),
-      description: 'Clickable button; use emit("press") for click',
+      description: 'Clickable button. Use on: { press: { action: "setState", params: { statePath: "/path", value: ... } } } so the State panel shows actions; add /state/<path> for any state that buttons or actions update.',
     },
     Text: {
       props: z.object({
@@ -117,6 +117,20 @@ export const catalog = defineCatalog(schema, {
     },
   },
   actions: {
+    setState: {
+      params: z.object({
+        statePath: z.string().describe('JSON Pointer path, e.g. /ui/lastAction or /form/submitted'),
+        value: z.unknown().optional().describe('Value to set; omit to clear'),
+      }),
+      description: 'Write a value to state at the given path so the State panel reflects it. Use for button clicks, form submitted, etc.',
+    },
+    trackPress: {
+      params: z.object({
+        id: z.string().optional().describe('Element id (e.g. btn, save-btn)'),
+        label: z.string().optional().describe('Button or control label for display in State panel'),
+      }),
+      description: 'Record a button or control press in state at /ui/lastAction so the State panel shows the last action.',
+    },
     submit: {
       params: z.object({ formId: z.string().optional() }),
       description: 'Submit a form',
@@ -127,7 +141,7 @@ export const catalog = defineCatalog(schema, {
     },
     press: {
       params: z.object({}),
-      description: 'Button or control pressed',
+      description: 'Button or control pressed (no state update); prefer setState or trackPress to show in State panel.',
     },
     ask: {
       params: z.object({
