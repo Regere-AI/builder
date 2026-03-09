@@ -22,22 +22,31 @@ export function ServiceCallNode(props: NodeProps<ServiceCallNodeData>) {
   return (
     <div
       className={`
-        min-w-[200px] rounded-lg border-2 px-4 py-3 shadow-md
+        min-w-[200px] max-w-[240px] rounded-lg border-2 px-4 py-3 shadow-md
         bg-[#2d2d2d] text-[#e0e0e0]
-        border-violet-600/60
+        border-violet-600/60 overflow-visible
         ${selected ? 'ring-2 ring-violet-500/60 ring-offset-2 ring-offset-[#1e1e1e]' : ''}
       `}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-violet-600/30 text-violet-400">
           <Server className="h-4 w-4" />
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="font-medium text-sm">Service Call</div>
+        <div className="min-w-0 flex-1 overflow-visible">
+          <div className="font-medium text-sm truncate">Service Call</div>
           {(nodeData?.method ?? nodeData?.path ?? nodeData?.serviceName) && (
-            <div className="truncate text-xs text-gray-400">
-              {[nodeData?.method, nodeData?.path].filter(Boolean).join(' ') ||
-                (nodeData?.serviceName && (nodeData?.operation ? `${nodeData.serviceName} · ${nodeData.operation}` : nodeData.serviceName))}
+            <div className="group/subtitle relative">
+              <div className="truncate text-xs text-gray-400">
+                {[nodeData?.method, nodeData?.path].filter(Boolean).join(' ') ||
+                  (nodeData?.serviceName && (nodeData?.operation ? `${nodeData.serviceName} · ${nodeData.operation}` : nodeData.serviceName))}
+              </div>
+              <div
+                className="absolute bottom-full left-0 z-50 mb-1 max-w-[320px] break-words rounded border border-[#3e3e3e] bg-[#252526] px-2 py-1.5 text-xs text-gray-200 shadow-lg opacity-0 pointer-events-none group-hover/subtitle:opacity-100"
+                role="tooltip"
+              >
+                {[nodeData?.method, nodeData?.path].filter(Boolean).join(' ') ||
+                  (nodeData?.serviceName && (nodeData?.operation ? `${nodeData.serviceName} · ${nodeData.operation}` : nodeData.serviceName))}
+              </div>
             </div>
           )}
           <div className="mt-1.5 flex items-center gap-1 text-[10px]" title={isProtected ? 'Authentication required' : 'Public endpoint'}>
@@ -50,8 +59,14 @@ export function ServiceCallNode(props: NodeProps<ServiceCallNodeData>) {
               <span className="text-gray-500">Public API</span>
             )}
           </div>
-          <div className="mt-1 truncate font-mono text-[10px] text-gray-600" title={id}>
-            {id}
+          <div className="mt-1 group/id relative">
+            <div className="truncate font-mono text-[10px] text-gray-600">{id}</div>
+            <div
+              className="absolute bottom-full left-0 z-50 mb-1 max-w-[320px] break-words rounded border border-[#3e3e3e] bg-[#252526] px-2 py-1.5 font-mono text-[10px] text-gray-200 shadow-lg opacity-0 pointer-events-none group-hover/id:opacity-100"
+              role="tooltip"
+            >
+              {id}
+            </div>
           </div>
         </div>
       </div>

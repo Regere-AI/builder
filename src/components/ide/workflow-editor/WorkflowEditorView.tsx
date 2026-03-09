@@ -103,9 +103,9 @@ export function WorkflowEditorView({ json, onChange }: WorkflowEditorViewProps) 
   }
 
   const handleUpdateNodeId = (oldId: string, newId: string) => {
-    const trimmed = newId.trim()
+    const trimmed = newId.trim().toLowerCase()
     if (!trimmed || trimmed === oldId) return
-    if (nodes.some((n) => n.id === trimmed)) return
+    if (nodes.some((n) => n.id.toLowerCase() === trimmed)) return
     setNodes((prev) =>
       prev.map((n) => (n.id === oldId ? { ...n, id: trimmed } : n))
     )

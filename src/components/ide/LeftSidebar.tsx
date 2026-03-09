@@ -740,7 +740,7 @@ export function LeftSidebar({
       id: slug,
       name,
       description,
-      version: '1.0.0',
+      version: 1,
     }
     const nodes =
       createWorkflowTriggerType === 'httpTrigger'

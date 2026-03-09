@@ -30,21 +30,29 @@ export function HttpTriggerNode(props: NodeProps) {
   return (
     <div
       className={`
-        min-w-[180px] rounded-lg border-2 px-4 py-3 shadow-md
+        min-w-[180px] max-w-[240px] rounded-lg border-2 px-4 py-3 shadow-md
         bg-[#2d2d2d] text-[#e0e0e0]
-        border-emerald-600/70
+        border-emerald-600/70 overflow-visible
         ${selected ? 'ring-2 ring-emerald-500/60 ring-offset-2 ring-offset-[#1e1e1e]' : ''}
       `}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-emerald-600/30 text-emerald-400">
           <Globe className="h-4 w-4" />
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="font-medium text-sm">HTTP Trigger</div>
+        <div className="min-w-0 flex-1 overflow-visible">
+          <div className="font-medium text-sm truncate">HTTP Trigger</div>
           {(data?.method ?? data?.path) && (
-            <div className="truncate text-xs text-gray-400">
-              {[data?.method, data?.path].filter(Boolean).join(' ')}
+            <div className="group/path relative">
+              <div className="truncate text-xs text-gray-400">
+                {[data?.method, data?.path].filter(Boolean).join(' ')}
+              </div>
+              <div
+                className="absolute bottom-full left-0 z-50 mb-1 max-w-[320px] break-words rounded border border-[#3e3e3e] bg-[#252526] px-2 py-1.5 text-xs text-gray-200 shadow-lg opacity-0 pointer-events-none group-hover/path:opacity-100"
+                role="tooltip"
+              >
+                {[data?.method, data?.path].filter(Boolean).join(' ')}
+              </div>
             </div>
           )}
           <div className="mt-1.5 flex items-center gap-1 text-[10px]" title={isProtected ? 'Authentication required' : 'Public endpoint'}>
@@ -57,8 +65,14 @@ export function HttpTriggerNode(props: NodeProps) {
               <span className="text-gray-500">Public API</span>
             )}
           </div>
-          <div className="mt-1 truncate font-mono text-[10px] text-gray-600" title={id}>
-            {id}
+          <div className="mt-1 group/id relative">
+            <div className="truncate font-mono text-[10px] text-gray-600">{id}</div>
+            <div
+              className="absolute bottom-full left-0 z-50 mb-1 max-w-[320px] break-words rounded border border-[#3e3e3e] bg-[#252526] px-2 py-1.5 font-mono text-[10px] text-gray-200 shadow-lg opacity-0 pointer-events-none group-hover/id:opacity-100"
+              role="tooltip"
+            >
+              {id}
+            </div>
           </div>
         </div>
       </div>

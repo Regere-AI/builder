@@ -14,6 +14,7 @@ import {
   HTTP_TRIGGER_NODE_TYPE,
   type HttpTriggerNodeData,
   HTTP_REQUEST_NODE_TYPE,
+  type HttpRequestNodeData,
   SERVICE_CALL_NODE_TYPE,
   type ServiceCallNodeData,
 } from './nodes'
@@ -377,8 +378,8 @@ export function NodePropertiesPanel({
           />
         )}
         {type === HTTP_REQUEST_NODE_TYPE && (
-          <ServiceCallFields
-            data={data as ServiceCallNodeData}
+          <HttpRequestFields
+            data={data as HttpRequestNodeData}
             onChange={handleChange}
             nodeSuggestions={nodeSuggestions}
           />
@@ -411,12 +412,12 @@ function NodeIdField({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setIdInput(nodeId)
+    setIdInput(nodeId.toLowerCase())
     setError(null)
   }, [nodeId])
 
   const handleBlur = () => {
-    const trimmed = idInput.trim()
+    const trimmed = idInput.trim().toLowerCase()
     if (!trimmed) {
       setError('ID is required')
       setIdInput(nodeId)
@@ -424,14 +425,16 @@ function NodeIdField({
     }
     if (trimmed === nodeId) {
       setError(null)
+      setIdInput(trimmed)
       return
     }
-    const isDuplicate = (nodeIds ?? []).some((id) => id === trimmed)
+    const isDuplicate = (nodeIds ?? []).some((id) => id.toLowerCase() === trimmed)
     if (isDuplicate) {
       setError('ID already in use')
       return
     }
     setError(null)
+    setIdInput(trimmed)
     onUpdateNodeId?.(nodeId, trimmed)
   }
 
@@ -446,7 +449,7 @@ function NodeIdField({
         type="text"
         value={idInput}
         onChange={(e) => {
-          setIdInput(e.target.value)
+          setIdInput(e.target.value.toLowerCase())
           setError(null)
         }}
         onBlur={handleBlur}
@@ -545,6 +548,161 @@ function HttpTriggerFields({
             onChange={(v) => onChange({ rawBody: v })}
             onClose={() => setFullEditorOpen(false)}
             focusRingClass="focus:ring-emerald-500/30 focus:border-emerald-500/60"
+            nodeSuggestions={nodeSuggestions}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function HttpRequestFields({
+  data,
+  onChange,
+  nodeSuggestions = [],
+}: {
+  data: HttpRequestNodeData
+  onChange: (updates: Record<string, unknown>) => void
+  nodeSuggestions?: string[]
+}) {
+  const [fullEditorOpen, setFullEditorOpen] = useState(false)
+  const method = (data.method as string) ?? 'GET'
+  const showPayload = BODY_METHODS.includes(method as (typeof BODY_METHODS)[number])
+  const payloadValue = typeof data.payload === 'string' ? data.payload : ''
+  const headersRecord = (data.header && typeof data.header === 'object' && !Array.isArray(data.header))
+    ? (data.header as Record<string, string>)
+    : {}
+  const headerEntries = Object.entries(headersRecord)
+
+  const setHeader = (key: string, value: string) => {
+    const next = { ...headersRecord }
+    if (value === '') {
+      delete next[key]
+    } else {
+      next[key] = value
+    }
+    onChange({ header: next })
+  }
+  const addHeader = () => {
+    onChange({ header: { ...headersRecord, '': '' } })
+  }
+  const removeHeader = (key: string) => {
+    const next = { ...headersRecord }
+    delete next[key]
+    onChange({ header: next })
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">
+          URL
+        </label>
+        <input
+          type="text"
+          value={(data.url as string) ?? ''}
+          onChange={(e) => onChange({ url: e.target.value })}
+          placeholder="https://api.example.com/..."
+          className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-sky-500/60 focus:ring-1 focus:ring-sky-500/30"
+        />
+      </div>
+      <div>
+        <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-gray-500">
+          Method
+        </label>
+        <select
+          value={method}
+          onChange={(e) => onChange({ method: e.target.value })}
+          className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-sm text-gray-200 outline-none focus:border-sky-500/60 focus:ring-1 focus:ring-sky-500/30"
+        >
+          {HTTP_METHODS.map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <div className="mb-1.5 flex items-center justify-between">
+          <label className="block text-xs font-medium uppercase tracking-wider text-gray-500">
+            Header
+          </label>
+          <button
+            type="button"
+            onClick={addHeader}
+            className="rounded px-1.5 py-0.5 text-xs text-gray-400 hover:bg-[#3e3e3e] hover:text-gray-200"
+          >
+            + Add header
+          </button>
+        </div>
+        <div className="space-y-2">
+          {headerEntries.length === 0 ? (
+            <p className="text-xs text-gray-500">No headers</p>
+          ) : (
+            headerEntries.map(([k, v]) => (
+              <div key={k} className="flex gap-2">
+                <input
+                  type="text"
+                  value={k}
+                  onChange={(e) => {
+                    const newKey = e.target.value
+                    if (newKey !== k) {
+                      const next = { ...headersRecord }
+                      delete next[k]
+                      if (newKey) next[newKey] = v
+                      onChange({ header: next })
+                    }
+                  }}
+                  placeholder="Name"
+                  className="flex-1 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-2 py-1.5 text-xs text-gray-200 placeholder:text-gray-500 outline-none focus:border-sky-500/60"
+                />
+                <input
+                  type="text"
+                  value={v}
+                  onChange={(e) => setHeader(k, e.target.value)}
+                  placeholder="Value"
+                  className="flex-1 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-2 py-1.5 text-xs text-gray-200 placeholder:text-gray-500 outline-none focus:border-sky-500/60"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeHeader(k)}
+                  className="shrink-0 rounded p-1.5 text-gray-400 hover:bg-[#3e3e3e] hover:text-white"
+                  aria-label="Remove header"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+      {showPayload && (
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label className="block text-xs font-medium uppercase tracking-wider text-gray-500">
+              Payload
+            </label>
+            <button
+              type="button"
+              onClick={() => setFullEditorOpen(true)}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-gray-400 hover:bg-[#3e3e3e] hover:text-gray-200"
+              title="Open full editor"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+              Full editor
+            </button>
+          </div>
+          <RawBodyEditor
+            value={payloadValue}
+            onChange={(v) => onChange({ payload: v })}
+            placeholder='{"key": "value"}'
+            className="focus:ring-sky-500/30 focus:border-sky-500/60"
+            nodeSuggestions={nodeSuggestions}
+          />
+          <RawBodyFullEditorModal
+            open={fullEditorOpen}
+            value={payloadValue}
+            onChange={(v) => onChange({ payload: v })}
+            onClose={() => setFullEditorOpen(false)}
+            focusRingClass="focus:ring-sky-500/30 focus:border-sky-500/60"
             nodeSuggestions={nodeSuggestions}
           />
         </div>

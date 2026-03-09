@@ -16,7 +16,7 @@ interface AddNodeToolbarProps {
 }
 
 function generateNodeId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`.toLowerCase()
 }
 
 export function AddNodeToolbar({ setNodes }: AddNodeToolbarProps) {
