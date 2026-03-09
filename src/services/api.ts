@@ -342,11 +342,26 @@ export async function launchpadLogin(
   return { sessionToken: res.sessionToken }
 }
 
-/** Launchpad health check (GET /launchpad/api/v1/health). Returns true if healthy. */
-export async function launchpadHealthCheck(baseUrl: string): Promise<boolean> {
-  const url = baseUrl.replace(/\/$/, '') + '/launchpad/api/v1/health'
-  const res = await fetch(url, { method: 'GET' })
-  return res.ok
+/** Launchpad health check (GET /health - Architect SDK health check). Returns true if healthy. Never throws. */
+export async function launchpadHealthCheck(
+  baseUrl: string,
+  options?: { signal?: AbortSignal; timeoutMs?: number }
+): Promise<boolean> {
+  const url = baseUrl.replace(/\/$/, '') + '/health'
+  const timeoutMs = options?.timeoutMs ?? 8000
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  if (options?.signal) {
+    options.signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+  try {
+    const res = await fetch(url, { method: 'GET', signal: controller.signal })
+    return res.ok
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 /** Response shape from GET /api/v1/services (list of services for the current launchpad). */

@@ -33,37 +33,43 @@ export function setJsonRenderState(updater: (prev: JsonRenderState) => JsonRende
 
 /**
  * Recursively collect all "$bindState" paths from a spec's elements (props and nested objects).
+ * When propKey is provided, collects { path, propKey } so we can infer initial value (e.g. checked -> false).
  */
 function collectBindStatePaths(
   value: unknown,
-  out: Set<string>
+  out: Set<string>,
+  pathToProp: Map<string, string>,
+  propKey?: string
 ): void {
   if (value == null) return
   if (typeof value === 'object' && !Array.isArray(value)) {
     const o = value as Record<string, unknown>
     if (typeof o.$bindState === 'string' && o.$bindState) {
       out.add(o.$bindState)
+      if (propKey != null) pathToProp.set(o.$bindState, propKey)
       return
     }
-    for (const v of Object.values(o)) collectBindStatePaths(v, out)
+    for (const [k, v] of Object.entries(o)) collectBindStatePaths(v, out, pathToProp, k)
   }
 }
 
 const INTERACTIVE_TYPES = new Set(['Button', 'Checkbox'])
+const BOOLEAN_BINDING_PROPS = new Set(['checked', 'pressed'])
 
 /**
  * Build an initial state object from $bindState paths (e.g. /contact/name -> { contact: { name: '' } })
  * and add ui: { lastAction, actionLog } when the spec has interactive elements.
- * So the State panel shows all bound paths and action area even when spec.state is missing.
+ * Paths bound to checked/pressed get false; others get ''.
  */
 export function inferInitialStateFromBindings(spec: {
   elements?: Record<string, { type?: string; props?: Record<string, unknown> }>
 } | null): JsonRenderState {
   const paths = new Set<string>()
+  const pathToProp = new Map<string, string>()
   let hasInteractive = false
   if (spec?.elements && typeof spec.elements === 'object') {
     for (const el of Object.values(spec.elements)) {
-      if (el?.props) collectBindStatePaths(el.props, paths)
+      if (el?.props) collectBindStatePaths(el.props, paths, pathToProp)
       if (el?.type && INTERACTIVE_TYPES.has(el.type)) hasInteractive = true
     }
   }
@@ -80,7 +86,10 @@ export function inferInitialStateFromBindings(spec: {
       current = current[key] as Record<string, unknown>
     }
     const lastKey = segments[segments.length - 1]
-    if (!(lastKey in current)) current[lastKey] = ''
+    if (!(lastKey in current)) {
+      const prop = pathToProp.get(path)
+      current[lastKey] = prop && BOOLEAN_BINDING_PROPS.has(prop) ? false : ''
+    }
   }
   if (hasInteractive) {
     const buttons: Record<string, boolean> = {}

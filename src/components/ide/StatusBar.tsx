@@ -5,7 +5,7 @@ import type { LaunchpadConfig } from '@/services/api'
 import { launchpadHealthCheck } from '@/services/api'
 import { gitIsRepo, gitCurrentBranch, gitListBranches, gitCheckoutBranch, gitCreateBranch } from '@/desktop'
 
-const LAUNCHPAD_HEALTH_POLL_MS = 10_000
+const LAUNCHPAD_HEALTH_POLL_MS = 30_000
 
 interface StatusBarProps {
   selectedLaunchpad?: LaunchpadConfig | null
@@ -39,9 +39,13 @@ export function StatusBar({
       return
     }
     let cancelled = false
+    const abortController = new AbortController()
     const check = async () => {
       try {
-        const ok = await launchpadHealthCheck(selectedLaunchpad!.url)
+        const ok = await launchpadHealthCheck(selectedLaunchpad!.url, {
+          signal: abortController.signal,
+          timeoutMs: 5000,
+        })
         if (!cancelled) setLaunchpadHealthy(ok)
       } catch {
         if (!cancelled) setLaunchpadHealthy(false)
@@ -51,6 +55,7 @@ export function StatusBar({
     const interval = setInterval(check, LAUNCHPAD_HEALTH_POLL_MS)
     return () => {
       cancelled = true
+      abortController.abort()
       clearInterval(interval)
     }
   }, [selectedLaunchpad?.url])

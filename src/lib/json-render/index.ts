@@ -21,11 +21,27 @@
  *   receive (params, setState, state). Updates go through the store (Zustand), so the same
  *   StateStore is used whether state is updated by bindings or by action handlers.
  *
+ * Dynamic data binding (all components, including dynamically added ones):
+ * - Catalog uses strProp, boolProp, valueProp for props that accept expressions. Specs can use
+ *   $state, $template, $cond, $item, $index in any such prop; form controls use $bindState/$bindItem
+ *   for two-way binding. See https://json-render.dev/docs/data-binding
+ * - When adding new components: (1) Use strProp/boolProp/valueProp in catalog for bindable props.
+ *   (2) In the registry, for form controls (value, checked, pressed), use useBoundProp(prop, bindings?.propName)
+ *   and write back via setValue so two-way binding works. (3) seedStateFromSpec + inferInitialStateFromBindings
+ *   will seed state for $bindState paths (boolean for checked/pressed, string otherwise).
+ *
  * Streaming: https://json-render.dev/docs/streaming
  * React API: https://json-render.dev/docs/api/react
  */
 
-export { catalog, type Catalog } from './catalog'
+export {
+  catalog,
+  type Catalog,
+  strProp,
+  strPropRequired,
+  boolProp,
+  valueProp,
+} from './catalog'
 export { registry, handlers, jsonRenderActionHandlers } from './registry'
 export {
   createSpecStreamCompiler,

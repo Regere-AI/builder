@@ -3,19 +3,36 @@ import { schema } from '@json-render/react/schema'
 import { z } from 'zod'
 
 /**
+ * Props can be literal values or json-render expressions so specs can use
+ * $state, $template, $cond, $item, $index, $bindState, $bindItem in any bindable prop.
+ * See https://json-render.dev/docs/data-binding
+ */
+const exprObject = z.record(z.string(), z.unknown())
+
+/** String prop that can be literal or expression (e.g. { "$state": "/path" }, { "$template": "Hi ${/name}" }). */
+export const strProp = z.union([z.string(), exprObject]).nullable().optional()
+/** String prop required (literal or expression). */
+export const strPropRequired = z.union([z.string(), exprObject])
+/** Boolean prop that can be literal or expression (e.g. { "$state": "/checked" }, { "$bindState": "/form/agree" }). */
+export const boolProp = z.union([z.boolean(), exprObject]).nullable().optional()
+/** Value prop for inputs: literal or $bindState / $state expression. */
+export const valueProp = z.union([z.string(), exprObject]).nullable().optional()
+
+/**
  * Builder catalog for json-render: components and actions the AI can use.
  * Aligns with shared/component-manifest.json and existing UI (Button, Input, Card, etc.).
+ * Any string/boolean prop above that uses strProp/boolProp/valueProp supports dynamic data binding in the spec.
  */
 export const catalog = defineCatalog(schema, {
   components: {
     Card: {
       props: z.object({
-        title: z.string().nullable().optional(),
-        description: z.string().nullable().optional(),
+        title: strProp,
+        description: strProp,
         variant: z.enum(['default', 'outlined']).nullable().optional(),
       }),
       slots: ['default'],
-      description: 'Container card for grouping content with optional title',
+      description: 'Container card for grouping content with optional title. Use $state or $template in title/description for dynamic data.',
     },
     CardHeader: {
       props: z.object({}),
@@ -23,12 +40,12 @@ export const catalog = defineCatalog(schema, {
       description: 'Card header section',
     },
     CardTitle: {
-      props: z.object({ content: z.string() }),
-      description: 'Card title text',
+      props: z.object({ content: strPropRequired }),
+      description: 'Card title text. Supports $state, $template, $cond in content.',
     },
     CardDescription: {
-      props: z.object({ content: z.string() }),
-      description: 'Card description text',
+      props: z.object({ content: strPropRequired }),
+      description: 'Card description text. Supports $state, $template, $cond in content.',
     },
     CardContent: {
       props: z.object({}),
@@ -42,42 +59,42 @@ export const catalog = defineCatalog(schema, {
     },
     Button: {
       props: z.object({
-        label: z.string(),
+        label: strPropRequired,
         variant: z.enum(['default', 'destructive', 'outline', 'secondary', 'ghost', 'link']).nullable().optional(),
         size: z.enum(['default', 'sm', 'lg', 'icon']).nullable().optional(),
-        disabled: z.boolean().nullable().optional(),
+        disabled: boolProp,
       }),
-      description: 'Clickable button. Use on: { press: { action: "setState", params: { statePath: "/path", value: ... } } } so the State panel shows actions; add /state/<path> for any state that buttons or actions update.',
+      description: 'Clickable button. Use on: { press: { action: "setState", params: { statePath: "/path", value: ... } } } so the State panel shows actions; add /state/<path> for any state that buttons or actions update. Label supports $state/$template.',
     },
     Text: {
       props: z.object({
-        content: z.string(),
+        content: strPropRequired,
         className: z.string().nullable().optional(),
       }),
-      description: 'Static text or paragraph only. Do NOT use for form data entry; use Input for any field where the user types.',
+      description: 'Static text or paragraph only. Do NOT use for form data entry; use Input for any field where the user types. Content supports $state, $template, $cond.',
     },
     Input: {
       props: z.object({
-        value: z.string().nullable().optional(),
+        value: valueProp,
         placeholder: z.string().nullable().optional(),
         type: z.enum(['text', 'password', 'email', 'number']).nullable().optional(),
-        disabled: z.boolean().nullable().optional(),
+        disabled: boolProp,
       }),
       description: 'Editable text field for user input. Use Input (not Label or Text) for every form field where the user must type: name, email, phone, etc. Use $bindState on value to bind to state (e.g. /form/name).',
     },
     Label: {
       props: z.object({
-        content: z.string(),
+        content: strPropRequired,
         htmlFor: z.string().nullable().optional(),
       }),
-      description: 'Optional label text displayed above or beside a form control. For data entry fields always add an Input; Label alone does not allow typing.',
+      description: 'Optional label text displayed above or beside a form control. For data entry fields always add an Input; Label alone does not allow typing. Content supports $state/$template.',
     },
     Checkbox: {
       props: z.object({
-        checked: z.boolean().nullable().optional(),
-        disabled: z.boolean().nullable().optional(),
+        checked: boolProp,
+        disabled: boolProp,
       }),
-      description: 'Checkbox input',
+      description: 'Checkbox input. Use checked: { "$bindState": "/path" } for two-way binding, or { "$state": "/path" } for read-only.',
     },
     Stack: {
       props: z.object({
@@ -102,18 +119,18 @@ export const catalog = defineCatalog(schema, {
     },
     Alert: {
       props: z.object({
-        title: z.string().nullable().optional(),
+        title: strProp,
         variant: z.enum(['default', 'destructive']).nullable().optional(),
       }),
       slots: ['default'],
-      description: 'Alert or callout box',
+      description: 'Alert or callout box. Title supports $state, $template, $cond.',
     },
     Badge: {
       props: z.object({
-        content: z.string(),
+        content: strPropRequired,
         variant: z.enum(['default', 'secondary', 'destructive', 'outline']).nullable().optional(),
       }),
-      description: 'Badge or tag',
+      description: 'Badge or tag. Content supports $state, $template, $cond.',
     },
   },
   actions: {

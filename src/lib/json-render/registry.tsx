@@ -7,6 +7,16 @@ import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
 
+/** Resolved display props can be string or expression object; only strings are valid ReactNode. */
+function asString(value: string | Record<string, unknown> | null | undefined): string {
+  return typeof value === 'string' ? value : ''
+}
+
+/** Resolved boolean props can be boolean or expression object; narrow for component props. */
+function asBoolean(value: boolean | Record<string, unknown> | null | undefined): boolean {
+  return typeof value === 'boolean' ? value : false
+}
+
 /**
  * React component registry for json-render: maps catalog types to UI components.
  * Use with <Renderer spec={spec} registry={registry} />.
@@ -21,11 +31,11 @@ export const { registry, handlers } = defineRegistry(catalog, {
           props.variant === 'outlined' && 'border-[#3e3e3e]'
         )}
       >
-        {props.title != null && props.title !== '' && (
-          <h2 className="text-sm font-semibold text-gray-200 mb-1">{props.title}</h2>
+        {asString(props.title) !== '' && (
+          <h2 className="text-sm font-semibold text-gray-200 mb-1">{asString(props.title)}</h2>
         )}
-        {props.description != null && props.description !== '' && (
-          <p className="text-xs text-gray-500 mb-2">{props.description}</p>
+        {asString(props.description) !== '' && (
+          <p className="text-xs text-gray-500 mb-2">{asString(props.description)}</p>
         )}
         {children}
       </div>
@@ -34,10 +44,10 @@ export const { registry, handlers } = defineRegistry(catalog, {
       <div className="mb-2">{children}</div>
     ),
     CardTitle: ({ props }) => (
-      <h3 className="text-sm font-semibold text-gray-200">{props.content}</h3>
+      <h3 className="text-sm font-semibold text-gray-200">{asString(props.content)}</h3>
     ),
     CardDescription: ({ props }) => (
-      <p className="text-xs text-gray-500 mt-0.5">{props.content}</p>
+      <p className="text-xs text-gray-500 mt-0.5">{asString(props.content)}</p>
     ),
     CardContent: ({ children }) => (
       <div className="text-sm text-gray-300">{children}</div>
@@ -49,37 +59,41 @@ export const { registry, handlers } = defineRegistry(catalog, {
       <Button
         variant={(props.variant ?? 'default') as 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link'}
         size={(props.size ?? 'default') as 'default' | 'sm' | 'lg' | 'icon'}
-        disabled={props.disabled ?? false}
+        disabled={asBoolean(props.disabled)}
         onClick={() => emit('press')}
       >
-        {props.label}
+        {asString(props.label)}
       </Button>
     ),
     Text: ({ props }) => (
-      <p className={cn('text-sm text-gray-300', props.className)}>{props.content}</p>
+      <p className={cn('text-sm text-gray-300', props.className)}>{asString(props.content)}</p>
     ),
     Input: ({ props, bindings }) => {
-      const [value, setValue] = useBoundProp<string>(props.value, bindings?.value ?? undefined)
+      const resolvedValue = typeof props.value === 'string' ? props.value : undefined
+      const [value, setValue] = useBoundProp<string>(resolvedValue, bindings?.value ?? undefined)
       return (
         <Input
           placeholder={props.placeholder ?? undefined}
           type={(props.type ?? 'text') as 'text' | 'password' | 'email' | 'number'}
-          disabled={props.disabled ?? false}
+          disabled={asBoolean(props.disabled)}
           value={value ?? ''}
           onChange={(e) => setValue(e.target.value)}
         />
       )
     },
     Label: ({ props }) => (
-      <Label htmlFor={props.htmlFor ?? undefined}>{props.content}</Label>
+      <Label htmlFor={props.htmlFor ?? undefined}>{asString(props.content)}</Label>
     ),
-    Checkbox: ({ props, emit }) => (
-      <Checkbox
-        checked={props.checked ?? false}
-        disabled={props.disabled ?? false}
-        onCheckedChange={() => emit('press')}
-      />
-    ),
+    Checkbox: ({ props, bindings, emit }) => {
+      const [checked, setChecked] = useBoundProp<boolean>(asBoolean(props.checked), bindings?.checked ?? undefined)
+      return (
+        <Checkbox
+          checked={checked ?? false}
+          disabled={asBoolean(props.disabled)}
+          onCheckedChange={(value) => (bindings?.checked != null ? setChecked(!!value) : emit('press'))}
+        />
+      )
+    },
     Stack: ({ props, children }) => (
       <div
         className={cn('flex gap-2', (props as { className?: string }).className)}
@@ -139,8 +153,8 @@ export const { registry, handlers } = defineRegistry(catalog, {
             : 'border-[#3e3e3e] bg-[#2d2d2d] text-gray-300'
         )}
       >
-        {props.title != null && props.title !== '' && (
-          <p className="font-medium mb-1">{props.title}</p>
+        {asString(props.title) !== '' && (
+          <p className="font-medium mb-1">{asString(props.title)}</p>
         )}
         {children}
       </div>
@@ -155,7 +169,7 @@ export const { registry, handlers } = defineRegistry(catalog, {
           (!props.variant || props.variant === 'default') && 'bg-[#007acc]/20 text-[#007acc]'
         )}
       >
-        {props.content}
+        {asString(props.content)}
       </span>
     ),
   },
@@ -210,15 +224,18 @@ export const { registry, handlers } = defineRegistry(catalog, {
 
 const baseHandlers = handlers(() => setJsonRenderState, () => getJsonRenderState())
 
+type SetStateFn = (u: (p: Record<string, unknown>) => Record<string, unknown>) => void
+type ActionHandler = (params: unknown, setState?: SetStateFn) => Promise<void>
+
 /**
  * Wrap all action handlers so every invocation is recorded in state.ui (lastAction, actionLog).
  * So the State panel shows actions from any UI element dynamically, not just those wired in the JSON.
  */
 function wrapHandlersToRecordActions(
-  h: Record<string, (params: unknown, setState?: (u: (p: Record<string, unknown>) => Record<string, unknown>) => void) => Promise<void>>
-): typeof h {
-  const wrapped = { ...h }
-  for (const [actionName, fn] of Object.entries(wrapped)) {
+  h: Record<string, (params: Record<string, unknown>, setState?: SetStateFn) => Promise<void>>
+): Record<string, ActionHandler> {
+  const wrapped: Record<string, ActionHandler> = {}
+  for (const [actionName, fn] of Object.entries(h)) {
     if (typeof fn !== 'function') continue
     wrapped[actionName] = async (params, setState) => {
       setState?.((prev) => {
@@ -239,7 +256,7 @@ function wrapHandlersToRecordActions(
           },
         }
       })
-      return fn(params, setState)
+      return fn(params as Record<string, unknown>, setState)
     }
   }
   return wrapped
