@@ -43,7 +43,59 @@ export interface AgentResponsePayload {
   content: { code: string; filePath?: string; /** Full path where file was written (Tauri); dashboard uses this when activeApp is null. */ resolvedPath?: string }
 }
 
-const GENERATED_RELATIVE_PATH = 'uiConfigs/generated.json'
+/** Layout JSON: .json but not .workflow.json */
+function isLayoutJsonPath(path: string): boolean {
+  const lower = path.toLowerCase()
+  return lower.endsWith('.json') && !lower.endsWith('.workflow.json')
+}
+
+/** Pick target file for this message: modify existing (from attached context) or new file. */
+function getTargetFilePathFromContext(attachedContexts: EditorSelectionPayload[]): string | null {
+  for (const p of attachedContexts) {
+    if (p.filePath && isLayoutJsonPath(p.filePath)) return p.filePath
+  }
+  return null
+}
+
+/** Derive a safe filename stem from a spec's layout title (root or first element with title/label). */
+function deriveTitleSlugFromSpec(spec: Record<string, unknown>): string {
+  const elements = spec.elements as Record<string, { props?: Record<string, unknown> }> | undefined
+  if (!elements || typeof elements !== 'object') return ''
+
+  const getTitle = (el: { props?: Record<string, unknown> } | undefined): string => {
+    if (!el?.props) return ''
+    const t = el.props.title ?? el.props.label ?? el.props.name
+    return typeof t === 'string' ? t.trim() : ''
+  }
+
+  const rootId = spec.root
+  if (typeof rootId === 'string' && elements[rootId]) {
+    const title = getTitle(elements[rootId])
+    if (title) return title
+  }
+  for (const el of Object.values(elements)) {
+    const title = getTitle(el)
+    if (title) return title
+  }
+  return ''
+}
+
+/** Sanitize a title into a safe filename stem (lowercase, spaces to hyphens, alphanumeric + hyphen). */
+function slugifyTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || ''
+}
+
+/** Generate path for a new UI file: same name as layout title when available, else generated-timestamp. */
+function generateNewLayoutPath(specOrNull: Record<string, unknown> | null): string {
+  const slug = specOrNull ? slugifyTitle(deriveTitleSlugFromSpec(specOrNull)) : ''
+  const base = slug || `generated-${Date.now()}`
+  return `uiConfigs/${base}.json`
+}
 
 function pathJoin(...parts: string[]): string {
   return parts.filter(Boolean).join('/').replace(/\\/g, '/')
@@ -82,14 +134,16 @@ interface ChatPanelProps {
   width?: number
   onWidthChange?: (width: number) => void
   onAgentResponse?: (data: AgentResponsePayload) => void
-  /** App root path (e.g. activeApp.rootPath). When set, streamed spec is written to uiConfigs/generated.json. */
+  /** App root path (e.g. activeApp.rootPath). When set, streamed spec is written to the target file path. */
   appRootPath?: string | null
+  /** Return content of an open file by path (for same-file modification and currentSpec). */
+  getOpenFileContent?: (path: string) => string | null
   /** When set, add this selection to attached contexts (e.g. from Ctrl+L); shown as a chip with remove button. */
   pendingContext?: EditorSelectionPayload | null
   /** Called after pendingContext has been added to attached list. */
   onConsumePendingContext?: () => void
-  /** Called with live spec while streaming (null when done). Used to show progressive UI in Preview tab. */
-  onStreamingSpecChange?: (spec: Spec | null) => void
+  /** Called with live spec while streaming (null when done). targetFilePath = file being built (modify) or null (new file). */
+  onStreamingSpecChange?: (spec: Spec | null, targetFilePath?: string | null) => void
 }
 
 const MIN_WIDTH = 300
@@ -148,7 +202,7 @@ function AssistantMessageBubble({
   )
 }
 
-export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentResponse, appRootPath, pendingContext, onConsumePendingContext, onStreamingSpecChange }: ChatPanelProps) {
+export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentResponse, appRootPath, getOpenFileContent, pendingContext, onConsumePendingContext, onStreamingSpecChange }: ChatPanelProps) {
   const [inputValue, setInputValue] = useState('')
   const [agentMode, setAgentMode] = useState<'Agent' | 'Plan'>('Agent')
   const [selectedModel, setSelectedModel] = useState<BuilderModelId>(() => {
@@ -172,6 +226,10 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
   const lastFinalSpecRef = useRef<Spec | null>(null)
   /** Spec we sent with the current request (used as initial for compiler when stream starts). */
   const sentCurrentSpecRef = useRef<Spec | null>(null)
+  /** Path of the file we're building in the current stream (modify this file) or null (new file). Set on send. */
+  const streamingTargetFilePathRef = useRef<string | null>(null)
+  /** Captured when stream starts so stream-end effect uses the correct path (ref can be overwritten by next send). */
+  const streamingTargetFilePathForCurrentStreamRef = useRef<string | null>(null)
 
   /** Live spec while the last assistant message is streaming (progressive SpecStream rendering). */
   const [liveStreamingSpec, setLiveStreamingSpec] = useState<Spec | null>(null)
@@ -179,7 +237,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
   const [uiGeneratedMessage, setUiGeneratedMessage] = useState<string | null>(null)
 
   useEffect(() => {
-    onStreamingSpecChange?.(liveStreamingSpec)
+    onStreamingSpecChange?.(liveStreamingSpec, streamingTargetFilePathRef.current)
   }, [liveStreamingSpec, onStreamingSpecChange])
 
   const chatBodyRef = useRef<Record<string, unknown>>(function initBody() {
@@ -252,6 +310,7 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
       return
     }
     if (!specStreamRef.current || specStreamRef.current.messageId !== last.id) {
+      streamingTargetFilePathForCurrentStreamRef.current = streamingTargetFilePathRef.current
       // Same-layout modification: when we sent currentSpec, apply patches on top of it
       const initial = sentCurrentSpecRef.current
         ? (JSON.parse(JSON.stringify(sentCurrentSpecRef.current)) as Record<string, unknown>)
@@ -482,8 +541,9 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
     if (!code) return
 
     // Ensure written spec has a valid root so the preview never shows "Invalid layout JSON"
+    let parsed: Record<string, unknown> | null = null
     try {
-      const parsed = JSON.parse(code) as Record<string, unknown>
+      parsed = JSON.parse(code) as Record<string, unknown>
       const normalized = ensureSpecHasRoot(parsed)
       if (normalized) code = JSON.stringify(normalized, null, 2)
       if (isJsonRenderSpec(parsed)) lastFinalSpecRef.current = (normalized ?? parsed) as Spec
@@ -492,44 +552,57 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
     }
     sentCurrentSpecRef.current = null
 
+    // Resolve path: modify existing file (from context) or new file (name from layout title)
+    const targetFilePath = streamingTargetFilePathForCurrentStreamRef.current
+    const isNewFile = !targetFilePath
+    const relativePath = targetFilePath ?? generateNewLayoutPath(parsed)
+    const looksAbsolute = (p: string) => /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('/')
+    const fullPathForWrite =
+      appRootPath && !looksAbsolute(relativePath)
+        ? pathJoin(appRootPath, relativePath)
+        : relativePath
+
     const notifyAndOpen = (resolvedPath?: string) => {
-      setUiGeneratedMessage('UI successfully generated')
+      setUiGeneratedMessage(isNewFile ? 'New UI file created' : 'UI file updated')
       onAgentResponse?.({
         type: 'code',
-        content: { code, filePath: GENERATED_RELATIVE_PATH, ...(resolvedPath && { resolvedPath }) },
+        content: { code, filePath: relativePath, ...(resolvedPath && { resolvedPath }) },
       })
     }
 
     if (isTauri()) {
       const doWrite = async () => {
-        if (appRootPath) {
-          const fullPath = pathJoin(appRootPath, GENERATED_RELATIVE_PATH)
+        if (appRootPath && !looksAbsolute(relativePath)) {
           const dirPath = pathJoin(appRootPath, 'uiConfigs')
           await appCreateDir(dirPath, true)
-          await appWriteTextFile(fullPath, code!)
-          notifyAndOpen(fullPath)
-        } else {
-          // No app folder open: use Save dialog so user picks their local directory (e.g. project folder)
-          const result = await saveFile(code!, 'generated.json')
-          if (result?.success && result.filePath) {
-            notifyAndOpen(result.filePath)
+          await appWriteTextFile(fullPathForWrite, code!)
+          notifyAndOpen(fullPathForWrite)
+        } else if (!appRootPath || looksAbsolute(relativePath)) {
+          // No app folder open or path is absolute: use Save dialog or write to absolute path
+          if (looksAbsolute(relativePath)) {
+            await appWriteTextFile(relativePath, code!)
+            notifyAndOpen(relativePath)
           } else {
-            // User canceled or error: still open in editor so they can copy/save later
-            notifyAndOpen()
+            const defaultName = relativePath.split(/[/\\]/).pop() || 'generated.json'
+            const result = await saveFile(code!, defaultName)
+            if (result?.success && result.filePath) {
+              notifyAndOpen(result.filePath)
+            } else {
+              notifyAndOpen()
+            }
           }
         }
       }
       void doWrite().catch((e) => {
-        console.error('Failed to write generated.json:', e)
+        console.error('Failed to write UI file:', e)
         notifyAndOpen()
       })
     } else {
-      // Web: trigger download so user gets the file locally
       const blob = new Blob([code], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = 'generated.json'
+      a.download = relativePath.split(/[/\\]/).pop() || 'generated.json'
       a.click()
       URL.revokeObjectURL(url)
       notifyAndOpen()
@@ -552,8 +625,31 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
 
     if (CHAT_API_URL && transport) {
       try {
-        chatBodyRef.current.currentSpec = lastFinalSpecRef.current ?? undefined
-        sentCurrentSpecRef.current = lastFinalSpecRef.current
+        const targetFilePath = getTargetFilePathFromContext(attachedContexts)
+        streamingTargetFilePathRef.current = targetFilePath
+
+        if (targetFilePath && getOpenFileContent) {
+          const content = getOpenFileContent(targetFilePath)
+          if (content) {
+            try {
+              const parsed = JSON.parse(content) as unknown
+              if (isJsonRenderSpec(parsed)) {
+                chatBodyRef.current.currentSpec = parsed as Spec
+                sentCurrentSpecRef.current = parsed as Spec
+              }
+            } catch {
+              // use last final spec or undefined
+              chatBodyRef.current.currentSpec = lastFinalSpecRef.current ?? undefined
+              sentCurrentSpecRef.current = lastFinalSpecRef.current
+            }
+          } else {
+            chatBodyRef.current.currentSpec = lastFinalSpecRef.current ?? undefined
+            sentCurrentSpecRef.current = lastFinalSpecRef.current
+          }
+        } else {
+          chatBodyRef.current.currentSpec = undefined
+          sentCurrentSpecRef.current = null
+        }
         await sendMessage({ text: prompt })
       } catch (err) {
         console.error('Chat send failed:', err)
@@ -563,6 +659,9 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
 
     if (isTauri()) {
       try {
+        const targetFilePath = getTargetFilePathFromContext(attachedContexts)
+        streamingTargetFilePathRef.current = targetFilePath
+        const isJson = (s: string) => s.trimStart().startsWith('{') || s.trimStart().startsWith('[')
         const isPlanMode = agentMode === 'Plan'
         const response = await chat({
           messages: [{ role: 'user', parts: [{ type: 'text', text: prompt }] }],
@@ -577,29 +676,38 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
             ? JSON.stringify((response as Record<string, unknown>).ui, null, 2)
             : '')
         if (codeForPreview) {
-          const isJson = codeForPreview.trimStart().startsWith('{') || codeForPreview.trimStart().startsWith('[')
-          const filePath = isJson ? GENERATED_RELATIVE_PATH : 'uiConfigs/generated.tsx'
-          if (isJson) {
+          let parsedForPath: Record<string, unknown> | null = null
+          if (isJson(codeForPreview)) {
+            try {
+              parsedForPath = JSON.parse(codeForPreview) as Record<string, unknown>
+            } catch {
+              // ignore
+            }
+          }
+          const relativePath = targetFilePath ?? generateNewLayoutPath(parsedForPath)
+          const filePath = isJson(codeForPreview) ? relativePath : 'uiConfigs/generated.tsx'
+          if (isJson(codeForPreview)) {
             const doWrite = async () => {
               let resolvedPath: string | undefined
-              if (appRootPath) {
-                const fullPath = pathJoin(appRootPath, GENERATED_RELATIVE_PATH)
+              const looksAbsolute = (p: string) => /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('/')
+              if (appRootPath && !looksAbsolute(relativePath)) {
+                const fullPath = pathJoin(appRootPath, relativePath)
                 const dirPath = pathJoin(appRootPath, 'uiConfigs')
                 await appCreateDir(dirPath, true)
                 await appWriteTextFile(fullPath, codeForPreview)
                 resolvedPath = fullPath
               } else {
-                const result = await saveFile(codeForPreview, 'generated.json')
+                const result = await saveFile(codeForPreview, relativePath.split(/[/\\]/).pop() || 'generated.json')
                 if (result?.success && result.filePath) resolvedPath = result.filePath
               }
               onAgentResponse?.({
                 type: 'code',
-                content: { code: codeForPreview, filePath, ...(resolvedPath && { resolvedPath }) },
+                content: { code: codeForPreview, filePath: relativePath, ...(resolvedPath && { resolvedPath }) },
               })
             }
             void doWrite().catch((e) => {
-              console.error('Failed to write generated.json:', e)
-              onAgentResponse?.({ type: 'code', content: { code: codeForPreview, filePath } })
+              console.error('Failed to write UI file:', e)
+              onAgentResponse?.({ type: 'code', content: { code: codeForPreview, filePath: relativePath } })
             })
           } else {
             onAgentResponse?.({ type: 'code', content: { code: codeForPreview, filePath } })

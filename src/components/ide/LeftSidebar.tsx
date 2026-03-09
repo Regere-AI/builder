@@ -194,6 +194,7 @@ interface SidebarNodeProps extends NodeRendererProps<TreeNode> {
   onDeleteNodes?: (ids: string[]) => void
   onNewFile?: (parentPath: string) => void
   onNewFolder?: (parentPath: string) => void
+  onAddFileToChat?: (path: string) => void
 }
 
 function SidebarNode({
@@ -212,6 +213,7 @@ function SidebarNode({
   onDeleteNodes,
   onNewFile,
   onNewFolder,
+  onAddFileToChat,
 }: SidebarNodeProps) {
   const data = node.data
   const isSelected = data.path === selectedPath
@@ -367,6 +369,14 @@ function SidebarNode({
           >
             Rename
           </ContextMenu.Item>
+          {!data.isDir && onAddFileToChat && (
+            <ContextMenu.Item
+              className="rounded px-2 py-1.5 text-sm text-gray-200 outline-none cursor-pointer hover:bg-[#094771] focus:bg-[#094771]"
+              onSelect={() => onAddFileToChat(data.path)}
+            >
+              Add to context
+            </ContextMenu.Item>
+          )}
           <ContextMenu.Item
             className="rounded px-2 py-1.5 text-sm text-gray-200 outline-none cursor-pointer hover:bg-[#094771] focus:bg-[#094771]"
             onSelect={() => {
@@ -414,6 +424,8 @@ interface LeftSidebarProps {
   onOpenApp: (app: ActiveApp | null) => void
   onCloseApp: () => void
   onOpenFile?: (path: string, content: string, options?: { fromGit?: boolean }) => void
+  /** Add entire file as chat context (opens chat panel). */
+  onAddFileToChat?: (path: string) => void
   /** Called after files/folders are deleted so the editor can close them. */
   onDeletePaths?: (paths: string[]) => void
   /** Increment to refresh the file tree (e.g. after chat creates a file in the app). */
@@ -444,6 +456,7 @@ export function LeftSidebar({
   onOpenApp: _onOpenApp,
   onCloseApp: _onCloseApp,
   onOpenFile,
+  onAddFileToChat,
   onDeletePaths,
   refreshTrigger,
   onPullOrBranchChange,
@@ -1075,6 +1088,7 @@ export function LeftSidebar({
                                 onDeleteNodes={(ids) => handleDelete({ ids })}
                                 onNewFile={(parentPath) => openCreateFileDialog(parentPath)}
                                 onNewFolder={(parentPath) => setPendingNewItem({ type: 'folder', parentPath })}
+                                onAddFileToChat={onAddFileToChat}
                               />
                             )}
                           </Tree>

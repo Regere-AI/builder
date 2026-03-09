@@ -134,8 +134,47 @@ export function setValueAtPath(
 }
 
 /**
+ * Build a fresh state object from a spec (for replacing store when switching to another file).
+ * Used so the State panel shows only the state for the currently viewed file.
+ */
+function buildFreshStateFromSpec(spec: {
+  state?: Record<string, unknown>
+  elements?: Record<string, { props?: Record<string, unknown> }>
+} | null): JsonRenderState {
+  if (!spec) return {}
+  const fromBindings = inferInitialStateFromBindings(spec)
+  if (spec.state && typeof spec.state === 'object') {
+    return deepMergeMissing(fromBindings, spec.state as JsonRenderState)
+  }
+  return fromBindings
+}
+
+/** Per-file state cache so switching tabs restores each file's state. */
+const stateCacheByFilePath = new Map<string, JsonRenderState>()
+
+/**
+ * Switch the store to the state for the given file. Saves current state to the previous file's cache,
+ * then loads the new file's state from cache or builds it from the spec. Keeps State panel consistent with the viewed file.
+ */
+export function switchStateToFile(
+  previousPath: string | null,
+  newPath: string,
+  specForNewFile: { state?: Record<string, unknown>; elements?: Record<string, { props?: Record<string, unknown> }> } | null
+): void {
+  if (previousPath) {
+    stateCacheByFilePath.set(previousPath, vanillaStore.getState())
+  }
+  const cached = stateCacheByFilePath.get(newPath)
+  const nextState = cached ?? buildFreshStateFromSpec(specForNewFile)
+  if (cached === undefined && specForNewFile) {
+    stateCacheByFilePath.set(newPath, nextState)
+  }
+  vanillaStore.setState(nextState)
+}
+
+/**
  * Deep-merge spec.state and inferred $bindState state into the store. Only adds keys that are missing
- * so existing user input is preserved. Call when rendering a spec so the State panel and $bindState work.
+ * so existing user input is preserved. Call when rendering a spec (same file) so the State panel and $bindState work.
  */
 export function seedStateFromSpec(spec: { state?: Record<string, unknown>; elements?: Record<string, { props?: Record<string, unknown> }> } | null): void {
   const current = vanillaStore.getState()

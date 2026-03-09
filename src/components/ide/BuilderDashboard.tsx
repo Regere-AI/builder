@@ -9,7 +9,7 @@ import { ApiSpecViewer } from './ApiSpecViewer'
 import type { Spec } from '@json-render/core'
 import { Renderer, JSONUIProvider } from '@json-render/react'
 import { registry, jsonRenderActionHandlers } from '@/lib/json-render/registry'
-import { jsonRenderStateStore, seedStateFromSpec } from '@/lib/json-render/zustand-store'
+import { jsonRenderStateStore, seedStateFromSpec, switchStateToFile } from '@/lib/json-render/zustand-store'
 import { parseToSpec, isJsonRenderSpec, attachOrphanElementsToRoot, injectDefaultActions, type JsonRenderSpec } from '@/lib/json-render/layout-to-spec'
 import { StateDebugPane } from './StateDebugPane'
 
@@ -75,8 +75,12 @@ export interface BuilderDashboardProps {
   agentResponse?: AgentResponsePayload
   /** Live spec while chat is streaming (show progressive UI in Preview). */
   liveStreamingSpec?: Spec | null
+  /** Path of the file being streamed (modify) or null (new file). Used to switch to that tab during streaming. */
+  liveStreamingTargetFilePath?: string | null
   /** When user adds selection to chat (e.g. Ctrl+L), open panel and set context. */
   onAddSelectionToChat?: (payload: EditorSelectionPayload) => void
+  /** Register a getter that returns open file content by path (for chat same-file modification). */
+  registerGetOpenFileContent?: (getter: (path: string) => string | null) => void
   /** Incremented when files change on disk (notify watcher) so we can refresh git diff. */
   fileChangeTrigger?: number
   /** Incremented when Pull or branch switch completes so we reload open files from disk. */
@@ -94,6 +98,8 @@ export function BuilderDashboard({
   onAgentResponseProcessed,
   agentResponse,
   liveStreamingSpec,
+  liveStreamingTargetFilePath,
+  registerGetOpenFileContent,
   onAddSelectionToChat,
   fileChangeTrigger,
   reloadOpenFilesTrigger,
@@ -118,6 +124,8 @@ export function BuilderDashboard({
   const getEditorSelectionRef = useRef<GetEditorSelection>(() => null)
   const onAddSelectionToChatRef = useRef(onAddSelectionToChat)
   onAddSelectionToChatRef.current = onAddSelectionToChat
+  /** Tracks the last layout JSON file path so we can switch state when the viewed file changes. */
+  const previousLayoutFilePathRef = useRef<string | null>(null)
   const [diffRanges, setDiffRanges] = useState<{ startLine: number; endLine: number }[]>([])
   const [workflowSyncLoading, setWorkflowSyncLoading] = useState(false)
   const [workflowSyncError, setWorkflowSyncError] = useState<string | null>(null)
@@ -241,6 +249,40 @@ export function BuilderDashboard({
     registerOpenFileFromSidebar(handler)
     return () => registerOpenFileFromSidebar(() => {})
   }, [registerOpenFileFromSidebar])
+
+  // Expose open file content by path for chat (same-file modification / currentSpec)
+  useEffect(() => {
+    if (!registerGetOpenFileContent) return
+    const getter = (path: string) => {
+      const files = openFilesRef.current
+      const normalized = (p: string) => p.replace(/\\/g, '/').toLowerCase()
+      const pathNorm = normalized(path)
+      const found = files.find(
+        (f) =>
+          normalized(f.path) === pathNorm ||
+          normalized(f.path).endsWith('/' + pathNorm) ||
+          pathNorm.endsWith('/' + normalized(f.path))
+      )
+      return found?.content ?? null
+    }
+    registerGetOpenFileContent(getter)
+    return () => registerGetOpenFileContent(() => null)
+  }, [registerGetOpenFileContent])
+
+  // When streaming targets a specific file, switch to that tab so Preview shows that file's live spec
+  useEffect(() => {
+    if (!liveStreamingSpec || !liveStreamingTargetFilePath) return
+    const files = openFilesRef.current
+    const normalized = (p: string) => p.replace(/\\/g, '/').toLowerCase()
+    const targetNorm = normalized(liveStreamingTargetFilePath)
+    const found = files.find(
+      (f) =>
+        normalized(f.path) === targetNorm ||
+        normalized(f.path).endsWith('/' + targetNorm) ||
+        targetNorm.endsWith('/' + normalized(f.path))
+    )
+    if (found) setActiveFile(found)
+  }, [liveStreamingSpec, liveStreamingTargetFilePath])
 
   // Clear auto-save timeout on unmount
   useEffect(() => {
@@ -933,8 +975,9 @@ export function BuilderDashboard({
           setOpenFiles((prev) => [...prev, newFile])
           setActiveFile(newFile)
         }
-        // Show the UI preview when opening generated.json from agent so the rendering tree is visible
-        if (relativePath === 'uiConfigs/generated.json') setShowPreview(true)
+        // Show the UI preview when opening a layout JSON file from agent so the rendering tree is visible
+        if (relativePath.toLowerCase().endsWith('.json') && !relativePath.toLowerCase().endsWith('.workflow.json'))
+          setShowPreview(true)
         onAgentResponseProcessed?.()
       }
       writeAndOpen()
@@ -961,11 +1004,14 @@ export function BuilderDashboard({
   })()
   const hasWorkflowId = workflowIdFromFile != null
   const layoutSpecFromFile = activeFile && isLayoutJsonFile ? parseLayoutOrSpec(activeFile.content) : null
-  // When agent just returned code for generated.json, use that spec so the UI tree renders even before file is focused
+  // When agent just returned code for a layout JSON file, use that spec so the UI tree renders even before file is focused
+  const agentLayoutFilePath = agentResponse?.content?.filePath
+  const isAgentLayoutJson =
+    agentLayoutFilePath &&
+    agentLayoutFilePath.toLowerCase().endsWith('.json') &&
+    !agentLayoutFilePath.toLowerCase().endsWith('.workflow.json')
   const generatedSpecFromAgent =
-    agentResponse?.type === 'code' &&
-    agentResponse.content?.filePath === 'uiConfigs/generated.json' &&
-    agentResponse.content?.code
+    agentResponse?.type === 'code' && isAgentLayoutJson && agentResponse.content?.code
       ? (() => {
           try {
             const parsed = JSON.parse(agentResponse.content.code) as unknown
@@ -976,7 +1022,6 @@ export function BuilderDashboard({
         })()
       : null
   const layoutSpec = layoutSpecFromFile ?? generatedSpecFromAgent
-  const isGeneratedJson = agentResponse?.content?.filePath === 'uiConfigs/generated.json'
   /** When chat is streaming, show progressive UI in Preview; prefer live spec over file spec. */
   const previewSpec = liveStreamingSpec ?? layoutSpec
   /** Attach orphans to root; inject default on.press for interactive elements so State panel shows all actions. */
@@ -986,12 +1031,24 @@ export function BuilderDashboard({
       : previewSpec
   const showLayoutPreview =
     !!specForPreview &&
-    (liveStreamingSpec != null ? true : showPreview && isLayoutJsonFile ? true : agentResponse?.type === 'code' && !!isGeneratedJson)
+    (liveStreamingSpec != null ? true : showPreview && isLayoutJsonFile ? true : agentResponse?.type === 'code' && !!isAgentLayoutJson)
 
-  // Seed store from spec.state so State panel and $bindState show correct data; merge-only so user input is preserved
+  // Keep State panel consistent with the file being viewed: per-file state cache, switch on tab change, merge when same file
   useEffect(() => {
-    if (specForPreview && typeof specForPreview === 'object') seedStateFromSpec(specForPreview as { state?: Record<string, unknown> })
-  }, [specForPreview])
+    const spec = specForPreview && typeof specForPreview === 'object' ? (specForPreview as { state?: Record<string, unknown> }) : null
+    if (!spec) return
+    const currentLayoutPath = activeFile && isLayoutJsonFile ? activeFile.path : null
+    if (currentLayoutPath !== null) {
+      if (previousLayoutFilePathRef.current !== currentLayoutPath) {
+        switchStateToFile(previousLayoutFilePathRef.current, currentLayoutPath, spec)
+        previousLayoutFilePathRef.current = currentLayoutPath
+      } else {
+        seedStateFromSpec(spec)
+      }
+    } else {
+      previousLayoutFilePathRef.current = null
+    }
+  }, [specForPreview, activeFile?.path, isLayoutJsonFile])
 
   // Key so Renderer re-mounts when spec structure changes (fixes stale preview after modifications)
   const previewSpecKey =

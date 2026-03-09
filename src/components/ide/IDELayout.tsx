@@ -6,7 +6,7 @@ import { ChatPanel, type AgentResponsePayload } from './ChatPanel'
 import type { EditorSelectionPayload } from './EditorView'
 import { StatusBar } from './StatusBar'
 import type { LaunchpadConfig } from '@/services/api'
-import { isTauri, watchDirectory, stopWatching, listenFileChanged } from '@/desktop'
+import { isTauri, watchDirectory, stopWatching, listenFileChanged, appReadTextFile } from '@/desktop'
 
 interface User {
   firstName: string
@@ -37,7 +37,9 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
   const [pendingChatContext, setPendingChatContext] = useState<EditorSelectionPayload | null>(null)
   const [agentResponse, setAgentResponse] = useState<AgentResponsePayload | undefined>(undefined)
   const [liveStreamingSpec, setLiveStreamingSpec] = useState<Spec | null>(null)
+  const [liveStreamingTargetFilePath, setLiveStreamingTargetFilePath] = useState<string | null>(null)
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0)
+  const getOpenFileContentRef = useRef<((path: string) => string | null) | null>(null)
   const [fileChangeTrigger, setFileChangeTrigger] = useState(0)
   const [reloadOpenFilesTrigger, setReloadOpenFilesTrigger] = useState(0)
 
@@ -57,6 +59,26 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
     filesDeletedFromSidebarHandlerRef.current?.(paths)
   }, [])
   const handleAddSelectionToChat = useCallback((payload: EditorSelectionPayload) => {
+    setChatPanelOpen(true)
+    setPendingChatContext(payload)
+  }, [])
+  const handleAddFileToChat = useCallback(async (filePath: string) => {
+    let content: string | null = getOpenFileContentRef.current?.(filePath) ?? null
+    if (content === null && isTauri()) {
+      try {
+        content = await appReadTextFile(filePath)
+      } catch {
+        return
+      }
+    }
+    if (content === null) return
+    const lines = content.split(/\r?\n/)
+    const payload: EditorSelectionPayload = {
+      filePath,
+      startLine: 1,
+      endLine: lines.length || 1,
+      text: content,
+    }
     setChatPanelOpen(true)
     setPendingChatContext(payload)
   }, [])
@@ -161,6 +183,7 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
           onOpenApp={onOpenApp}
           onCloseApp={onCloseApp}
           onOpenFile={handleOpenFileFromSidebar}
+          onAddFileToChat={handleAddFileToChat}
           onDeletePaths={handleFilesDeletedFromSidebar}
           refreshTrigger={sidebarRefreshTrigger}
           onPullOrBranchChange={handleGitAffectedFiles}
@@ -174,11 +197,13 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
           user={user}
           agentResponse={agentResponse}
           liveStreamingSpec={liveStreamingSpec}
+          liveStreamingTargetFilePath={liveStreamingTargetFilePath}
           activeProject={activeProject}
           activeApp={activeApp}
           registerOpenFileFromSidebar={(handler) => { openFileFromSidebarHandlerRef.current = handler }}
           registerFilesDeletedFromSidebar={(handler) => { filesDeletedFromSidebarHandlerRef.current = handler }}
           registerOpenApiSpec={(handler) => { openApiSpecHandlerRef.current = handler }}
+          registerGetOpenFileContent={(getter) => { getOpenFileContentRef.current = getter }}
           onAppFilesChanged={() => setSidebarRefreshTrigger((n) => n + 1)}
           onAgentResponseProcessed={() => setAgentResponse(undefined)}
           onAddSelectionToChat={handleAddSelectionToChat}
@@ -194,9 +219,13 @@ export function IDELayout({ user, activeProject, activeApp, onOpenApp, onCloseAp
           onWidthChange={setChatPanelWidth}
           onAgentResponse={setAgentResponse}
           appRootPath={activeApp?.rootPath ?? null}
+          getOpenFileContent={(path) => getOpenFileContentRef.current?.(path) ?? null}
           pendingContext={pendingChatContext}
           onConsumePendingContext={handleConsumePendingContext}
-          onStreamingSpecChange={setLiveStreamingSpec}
+          onStreamingSpecChange={(spec, targetFilePath) => {
+            setLiveStreamingSpec(spec)
+            setLiveStreamingTargetFilePath(targetFilePath ?? null)
+          }}
         />
       </div>
 
