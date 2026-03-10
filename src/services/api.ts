@@ -443,25 +443,7 @@ export async function launchpadGetServiceSpec(
   })
 }
 
-/** Workflow service slug used for launchpad proxy path /proxy/{slug}/workflows */
-const WORKFLOW_SERVICE_SLUG = 'workflow'
-
-function workflowProxyUrl(baseUrl: string, workflowId?: string): string {
-  const base = baseUrl.replace(/\/$/, '')
-  if (workflowId) return `${base}/proxy/${WORKFLOW_SERVICE_SLUG}/workflows/${encodeURIComponent(workflowId)}`
-  return `${base}/proxy/${WORKFLOW_SERVICE_SLUG}/workflows`
-}
-
-function workflowRequestHeaders(sessionToken: string, tenant: string): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${sessionToken}`,
-  }
-  if (tenant) headers['X-Tenant-ID'] = tenant
-  return headers
-}
-
-/** Create workflow via launchpad proxy (POST /proxy/workflow/workflows). Do not send id; backend assigns it. Returns the created workflow id. */
+/** Create workflow via launchpad proxy (POST /proxy/workflow/workflows). Calls Rust backend. Do not send id; backend assigns it. Returns the created workflow id. */
 export async function launchpadWorkflowCreate(
   baseUrl: string,
   options: { sessionToken: string; tenant: string },
@@ -473,39 +455,108 @@ export async function launchpadWorkflowCreate(
     data: { nodes: unknown[]; edges: unknown[] }
   }
 ): Promise<{ id: string }> {
-  const url = workflowProxyUrl(baseUrl)
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: workflowRequestHeaders(options.sessionToken, options.tenant ?? ''),
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Workflow create failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`)
+  if (!isTauri()) {
+    throw new Error('Workflow API is only available in the desktop app')
   }
-  const json = (await res.json()) as { id?: string; workflowId?: string }
-  const id = json?.id ?? json?.workflowId
-  if (!id) throw new Error('Workflow create response missing id')
-  return { id: String(id) }
+  const res = await invoke<{ id: string }>('launchpad_workflow_create', {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    sessionToken: options.sessionToken,
+    tenant: options.tenant ?? '',
+    body,
+  })
+  return res
 }
 
-/** Update workflow via launchpad proxy (PUT /proxy/workflow/workflows/{workflowId}). */
+/** Update workflow via launchpad proxy (PUT /proxy/workflow/workflows/{workflowId}). Calls Rust backend. */
 export async function launchpadWorkflowUpdate(
   baseUrl: string,
   options: { sessionToken: string; tenant: string },
   workflowId: string,
   body: { definition: { data: { nodes: unknown[]; edges: unknown[] } }; is_latest: boolean }
 ): Promise<void> {
-  const url = workflowProxyUrl(baseUrl, workflowId)
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: workflowRequestHeaders(options.sessionToken, options.tenant ?? ''),
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Workflow update failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`)
+  if (!isTauri()) {
+    throw new Error('Workflow API is only available in the desktop app')
   }
+  await invoke('launchpad_workflow_update', {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    sessionToken: options.sessionToken,
+    tenant: options.tenant ?? '',
+    workflowId,
+    body,
+  })
+}
+
+/** Trigger workflow execution via launchpad proxy (POST /proxy/workflow/webhook/{workflowId}). Calls Rust backend. */
+export async function launchpadWorkflowExecute(
+  baseUrl: string,
+  options: { sessionToken: string; tenant: string; customHeaders?: Record<string, string> },
+  workflowId: string,
+  body: Record<string, unknown>
+): Promise<unknown> {
+  if (!isTauri()) {
+    throw new Error('Workflow API is only available in the desktop app')
+  }
+  return invoke('launchpad_workflow_execute', {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    sessionToken: options.sessionToken,
+    tenant: options.tenant ?? '',
+    workflowId,
+    body,
+  })
+}
+
+/** Node result in context.nodes (request/response for one step). */
+export interface WorkflowExecutionNodeResult {
+  body?: unknown
+  headers?: Record<string, string>
+  status?: number
+  [key: string]: unknown
+}
+
+/** Execution context with Webhook and per-node results. */
+export interface WorkflowExecutionContext {
+  Webhook?: { body?: unknown; headers?: Record<string, string> }
+  current?: Record<string, unknown>
+  nodes?: Record<string, WorkflowExecutionNodeResult>
+  [key: string]: unknown
+}
+
+/** Single workflow execution (matches API: id, workflow_id, started_at, finished_at, context). */
+export interface WorkflowExecution {
+  id?: string
+  workflow_id?: string
+  workflow_version?: number
+  status?: string
+  started_at?: string
+  finished_at?: string
+  context?: WorkflowExecutionContext
+  /** Legacy/camelCase aliases */
+  workflowId?: string
+  workflowName?: string
+  startedAt?: string
+  completedAt?: string
+  steps?: unknown[]
+  input?: unknown
+  output?: unknown
+  error?: string
+  [key: string]: unknown
+}
+
+/** List workflow executions via launchpad proxy (GET /proxy/workflow/executions?workflow_id=...). Calls Rust backend. */
+export async function launchpadWorkflowExecutions(
+  baseUrl: string,
+  options: { sessionToken: string; tenant: string; workflowId?: string }
+): Promise<WorkflowExecution[]> {
+  if (!isTauri()) {
+    throw new Error('Workflow API is only available in the desktop app')
+  }
+  const list = await invoke<WorkflowExecution[]>('launchpad_workflow_executions', {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    sessionToken: options.sessionToken,
+    tenant: options.tenant ?? '',
+    workflowId: options.workflowId ?? null,
+  })
+  return Array.isArray(list) ? list : []
 }
 
 const LAUNCHPAD_SESSION_STORAGE_KEY = 'builder_launchpad_session'

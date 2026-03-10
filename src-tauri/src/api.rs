@@ -1061,3 +1061,167 @@ pub async fn launchpad_get_service_spec(
         .map_err(|e| format!("Invalid spec JSON: {}", e))?;
     Ok(spec)
 }
+
+// ---------- Launchpad: Workflow proxy (workflow service) ----------
+
+const WORKFLOW_SERVICE_SLUG: &str = "workflow";
+
+/// POST /proxy/workflow/workflows — create workflow. Returns { id }.
+#[tauri::command]
+pub async fn launchpad_workflow_create(
+    base_url: String,
+    session_token: String,
+    tenant: String,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let base = base_url.trim_end_matches('/');
+    let url = format!("{}/proxy/{}/workflows", base, WORKFLOW_SERVICE_SLUG);
+    let client = Client::new();
+    let mut req = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", session_token))
+        .header("Content-Type", "application/json");
+    if !tenant.is_empty() {
+        req = req.header("X-Tenant-ID", tenant.as_str());
+    }
+    let res = req
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Workflow create failed: {}", map_reqwest_error(e, "Request failed")))?;
+    let status = res.status();
+    let text = res
+        .text()
+        .await
+        .map_err(|e| format!("Workflow create response: {}", map_reqwest_error(e, "Read failed")))?;
+    if !status.is_success() {
+        return Err(format!("Workflow create failed ({}): {}", status, text.chars().take(300).collect::<String>()));
+    }
+    let json: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Invalid workflow create JSON: {}", e))?;
+    let id = json.get("id").or_else(|| json.get("workflowId"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Workflow create response missing id".to_string())?;
+    Ok(serde_json::json!({ "id": id }))
+}
+
+/// PUT /proxy/workflow/workflows/{workflow_id} — update workflow.
+#[tauri::command]
+pub async fn launchpad_workflow_update(
+    base_url: String,
+    session_token: String,
+    tenant: String,
+    workflow_id: String,
+    body: serde_json::Value,
+) -> Result<(), String> {
+    let base = base_url.trim_end_matches('/');
+    let encoded = urlencoding::encode(workflow_id.trim());
+    let url = format!("{}/proxy/{}/workflows/{}", base, WORKFLOW_SERVICE_SLUG, encoded);
+    let client = Client::new();
+    let mut req = client
+        .put(&url)
+        .header("Authorization", format!("Bearer {}", session_token))
+        .header("Content-Type", "application/json");
+    if !tenant.is_empty() {
+        req = req.header("X-Tenant-ID", tenant.as_str());
+    }
+    let res = req
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Workflow update failed: {}", map_reqwest_error(e, "Request failed")))?;
+    let status = res.status();
+    if !status.is_success() {
+        let text = res.text().await.unwrap_or_default();
+        return Err(format!("Workflow update failed ({}): {}", status, text.chars().take(300).collect::<String>()));
+    }
+    Ok(())
+}
+
+/// POST /proxy/workflow/webhook/{workflow_id} — trigger execution.
+#[tauri::command]
+pub async fn launchpad_workflow_execute(
+    base_url: String,
+    session_token: String,
+    tenant: String,
+    workflow_id: String,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let base = base_url.trim_end_matches('/');
+    let encoded = urlencoding::encode(workflow_id.trim());
+    let url = format!("{}/proxy/{}/webhook/{}", base, WORKFLOW_SERVICE_SLUG, encoded);
+    let client = Client::new();
+    let mut req = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", session_token))
+        .header("Content-Type", "application/json");
+    if !tenant.is_empty() {
+        req = req.header("X-Tenant-ID", tenant.as_str());
+    }
+    let res = req
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Workflow execute failed: {}", map_reqwest_error(e, "Request failed")))?;
+    let status = res.status();
+    let text = res
+        .text()
+        .await
+        .map_err(|e| format!("Workflow execute response: {}", map_reqwest_error(e, "Read failed")))?;
+    if !status.is_success() {
+        return Err(format!("Workflow execute failed ({}): {}", status, text.chars().take(300).collect::<String>()));
+    }
+    if text.trim().is_empty() {
+        return Ok(serde_json::Value::Null);
+    }
+    serde_json::from_str(&text).map_err(|e| format!("Invalid workflow execute JSON: {}", e))
+}
+
+/// GET /proxy/workflow/executions?workflow_id=... — list executions.
+#[tauri::command]
+pub async fn launchpad_workflow_executions(
+    base_url: String,
+    session_token: String,
+    tenant: String,
+    workflow_id: Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let base = base_url.trim_end_matches('/');
+    let url = if let Some(ref id) = workflow_id {
+        if id.is_empty() {
+            format!("{}/proxy/{}/executions", base, WORKFLOW_SERVICE_SLUG)
+        } else {
+            format!("{}/proxy/{}/executions?workflow_id={}", base, WORKFLOW_SERVICE_SLUG, urlencoding::encode(id))
+        }
+    } else {
+        format!("{}/proxy/{}/executions", base, WORKFLOW_SERVICE_SLUG)
+    };
+    let client = Client::new();
+    let mut req = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", session_token));
+    if !tenant.is_empty() {
+        req = req.header("X-Tenant-ID", tenant.as_str());
+    }
+    let res = req
+        .send()
+        .await
+        .map_err(|e| format!("Workflow executions failed: {}", map_reqwest_error(e, "Request failed")))?;
+    let status = res.status();
+    let text = res
+        .text()
+        .await
+        .map_err(|e| format!("Workflow executions response: {}", map_reqwest_error(e, "Read failed")))?;
+    if !status.is_success() {
+        return Err(format!("Workflow executions failed ({}): {}", status, text.chars().take(300).collect::<String>()));
+    }
+    let data: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("Invalid workflow executions JSON: {}", e))?;
+    let list = if let Some(arr) = data.get("executions").and_then(|v| v.as_array()) {
+        arr.clone()
+    } else if let Some(arr) = data.as_array() {
+        arr.clone()
+    } else {
+        vec![]
+    };
+    Ok(list)
+}

@@ -555,6 +555,10 @@ pub fn run() {
             api::launchpad_login,
             api::launchpad_logout,
             api::launchpad_get_service_spec,
+            api::launchpad_workflow_create,
+            api::launchpad_workflow_update,
+            api::launchpad_workflow_execute,
+            api::launchpad_workflow_executions,
         ])
         .run(tauri::generate_context!())
     {

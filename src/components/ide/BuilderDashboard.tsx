@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Folder, Code, Layout, Save } from 'lucide-react'
+import { Folder, Code, Layout, Save, Play, List } from 'lucide-react'
 import { Button } from '../ui/button'
 import { EditorView } from './EditorView'
 import { JsonSplitView } from './JsonSplitView'
@@ -43,8 +43,14 @@ import type { AgentResponsePayload } from './ChatPanel'
 import type { GetEditorSelection, EditorSelectionPayload } from './EditorView'
 import { GitDiffView } from './GitDiffView'
 import { WorkflowEditorView } from './WorkflowEditorView'
-import { getLaunchpadSession, launchpadWorkflowCreate, launchpadWorkflowUpdate } from '@/services/api'
+import {
+  getLaunchpadSession,
+  launchpadWorkflowCreate,
+  launchpadWorkflowUpdate,
+  launchpadWorkflowExecute,
+} from '@/services/api'
 import { toast } from 'sonner'
+import { WorkflowExecutionsPanel } from './WorkflowExecutionsPanel'
 
 function parseLayoutOrSpec(content: string): ReturnType<typeof parseToSpec> {
   return parseToSpec(content)
@@ -115,6 +121,8 @@ export function BuilderDashboard({
   const [diffRanges, setDiffRanges] = useState<{ startLine: number; endLine: number }[]>([])
   const [workflowSyncLoading, setWorkflowSyncLoading] = useState(false)
   const [workflowSyncError, setWorkflowSyncError] = useState<string | null>(null)
+  const [workflowExecuteLoading, setWorkflowExecuteLoading] = useState(false)
+  const [showExecutionsPanel, setShowExecutionsPanel] = useState(false)
 
   // Fetch git diff for modified lines when opening a file (Tauri only)
   useEffect(() => {
@@ -577,6 +585,30 @@ export function BuilderDashboard({
     }
   }
 
+  const handleExecuteWorkflow = async () => {
+    if (!workflowIdFromFile) return
+    const session = getLaunchpadSession()
+    if (!session?.url || !session?.token) {
+      toast.error('Launchpad session required')
+      return
+    }
+    setWorkflowExecuteLoading(true)
+    try {
+      await launchpadWorkflowExecute(
+        session.url,
+        { sessionToken: session.token, tenant: session.tenant ?? '' },
+        workflowIdFromFile,
+        {}
+      )
+      toast.success('Workflow execution triggered')
+      setShowExecutionsPanel(true)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Execute failed')
+    } finally {
+      setWorkflowExecuteLoading(false)
+    }
+  }
+
   const handleSaveAs = async () => {
     if (!activeFile) return
     if (activeFile.path === SETTINGS_TAB_PATH) return
@@ -918,15 +950,16 @@ export function BuilderDashboard({
   const isJsonFile = activeFile?.path?.toLowerCase().endsWith('.json')
   const isWorkflowFile = activeFile?.path?.toLowerCase().endsWith('.workflow.json')
   const isLayoutJsonFile = isJsonFile && !isWorkflowFile
-  const hasWorkflowId = (() => {
-    if (!activeFile?.content || !isWorkflowFile) return false
+  const workflowIdFromFile = (() => {
+    if (!activeFile?.content || !isWorkflowFile) return null
     try {
       const w = JSON.parse(activeFile.content) as Record<string, unknown>
-      return typeof w?.workflowId === 'string'
+      return typeof w?.workflowId === 'string' ? (w.workflowId as string) : null
     } catch {
-      return false
+      return null
     }
   })()
+  const hasWorkflowId = workflowIdFromFile != null
   const layoutSpecFromFile = activeFile && isLayoutJsonFile ? parseLayoutOrSpec(activeFile.content) : null
   // When agent just returned code for generated.json, use that spec so the UI tree renders even before file is focused
   const generatedSpecFromAgent =
@@ -1072,8 +1105,63 @@ export function BuilderDashboard({
             <Save className="w-4 h-4 mr-1" />
             {workflowSyncLoading ? 'Syncing…' : hasWorkflowId ? 'Update workflow' : 'Create workflow'}
           </Button>
+          {hasWorkflowId && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-sm text-gray-400 hover:text-gray-200 hover:bg-[#3e3e3e]"
+              onClick={handleExecuteWorkflow}
+              disabled={workflowExecuteLoading}
+              title="Trigger workflow execution"
+            >
+              <Play className="w-4 h-4 mr-1" />
+              {workflowExecuteLoading ? 'Running…' : 'Execute workflow'}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-sm text-gray-400 hover:text-gray-200 hover:bg-[#3e3e3e]"
+            onClick={() => {
+              if (getLaunchpadSession()?.token) setShowExecutionsPanel(true)
+              else toast.error('Launchpad session required')
+            }}
+            title="View workflow executions"
+          >
+            <List className="w-4 h-4 mr-1" />
+            Executions
+          </Button>
         </div>
       )}
+      {showExecutionsPanel && (() => {
+        const session = getLaunchpadSession()
+        if (!session?.url || !session?.token) return null
+        let workflowDefinition: { nodes: { id: string }[]; edges: { source: string; target: string }[] } | null = null
+        if (activeFile?.content && isWorkflowFile) {
+          try {
+            const w = JSON.parse(activeFile.content) as { data?: { nodes?: { id: string }[]; edges?: { source: string; target: string }[] } }
+            const data = w?.data
+            if (Array.isArray(data?.nodes) && Array.isArray(data?.edges)) {
+              workflowDefinition = {
+                nodes: data.nodes.map((n) => ({ id: n.id })),
+                edges: data.edges.map((e) => ({ source: e.source, target: e.target })),
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+        return (
+          <WorkflowExecutionsPanel
+            baseUrl={session.url}
+            sessionToken={session.token}
+            tenant={session.tenant ?? ''}
+            workflowId={workflowIdFromFile}
+            workflowDefinition={workflowDefinition}
+            onClose={() => setShowExecutionsPanel(false)}
+          />
+        )
+      })()}
       {/* Code / Preview toolbar for layout JSON files (e.g. .ui.json) */}
       {activeFile && isLayoutJsonFile && (
         <div className="h-9 bg-[#252526] border-b border-[#3e3e3e] flex items-center gap-1 px-2">
