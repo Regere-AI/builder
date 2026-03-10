@@ -737,7 +737,6 @@ export function LeftSidebar({
     const description = createWorkflowDescription.trim() || undefined
     const baseWorkflow = {
       triggerType: createWorkflowTriggerType,
-      id: slug,
       name,
       description,
       version: 1,

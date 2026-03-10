@@ -69,6 +69,7 @@
     "monaco-editor": "^0.45.0",
     "react-arborist": "^3.4.3",
     "react-select": "^5.10.2",
+    "sonner": "^2.0.7",
     "swagger-ui-react": "^5.32.0",
     "tailwind-merge": "^3.4.0",
     "yaml": "^2.8.2",

@@ -443,6 +443,71 @@ export async function launchpadGetServiceSpec(
   })
 }
 
+/** Workflow service slug used for launchpad proxy path /proxy/{slug}/workflows */
+const WORKFLOW_SERVICE_SLUG = 'workflow'
+
+function workflowProxyUrl(baseUrl: string, workflowId?: string): string {
+  const base = baseUrl.replace(/\/$/, '')
+  if (workflowId) return `${base}/proxy/${WORKFLOW_SERVICE_SLUG}/workflows/${encodeURIComponent(workflowId)}`
+  return `${base}/proxy/${WORKFLOW_SERVICE_SLUG}/workflows`
+}
+
+function workflowRequestHeaders(sessionToken: string, tenant: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${sessionToken}`,
+  }
+  if (tenant) headers['X-Tenant-ID'] = tenant
+  return headers
+}
+
+/** Create workflow via launchpad proxy (POST /proxy/workflow/workflows). Do not send id; backend assigns it. Returns the created workflow id. */
+export async function launchpadWorkflowCreate(
+  baseUrl: string,
+  options: { sessionToken: string; tenant: string },
+  body: {
+    triggerType: string
+    name: string
+    description?: string
+    version: number
+    data: { nodes: unknown[]; edges: unknown[] }
+  }
+): Promise<{ id: string }> {
+  const url = workflowProxyUrl(baseUrl)
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: workflowRequestHeaders(options.sessionToken, options.tenant ?? ''),
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Workflow create failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`)
+  }
+  const json = (await res.json()) as { id?: string; workflowId?: string }
+  const id = json?.id ?? json?.workflowId
+  if (!id) throw new Error('Workflow create response missing id')
+  return { id: String(id) }
+}
+
+/** Update workflow via launchpad proxy (PUT /proxy/workflow/workflows/{workflowId}). */
+export async function launchpadWorkflowUpdate(
+  baseUrl: string,
+  options: { sessionToken: string; tenant: string },
+  workflowId: string,
+  body: { definition: { data: { nodes: unknown[]; edges: unknown[] } }; is_latest: boolean }
+): Promise<void> {
+  const url = workflowProxyUrl(baseUrl, workflowId)
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: workflowRequestHeaders(options.sessionToken, options.tenant ?? ''),
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`Workflow update failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`)
+  }
+}
+
 const LAUNCHPAD_SESSION_STORAGE_KEY = 'builder_launchpad_session'
 
 export interface LaunchpadSession {

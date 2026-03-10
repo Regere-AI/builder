@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Folder, Code, Layout } from 'lucide-react'
+import { Folder, Code, Layout, Save } from 'lucide-react'
 import { Button } from '../ui/button'
 import { EditorView } from './EditorView'
 import { JsonSplitView } from './JsonSplitView'
@@ -43,6 +43,8 @@ import type { AgentResponsePayload } from './ChatPanel'
 import type { GetEditorSelection, EditorSelectionPayload } from './EditorView'
 import { GitDiffView } from './GitDiffView'
 import { WorkflowEditorView } from './WorkflowEditorView'
+import { getLaunchpadSession, launchpadWorkflowCreate, launchpadWorkflowUpdate } from '@/services/api'
+import { toast } from 'sonner'
 
 function parseLayoutOrSpec(content: string): ReturnType<typeof parseToSpec> {
   return parseToSpec(content)
@@ -111,6 +113,8 @@ export function BuilderDashboard({
   const onAddSelectionToChatRef = useRef(onAddSelectionToChat)
   onAddSelectionToChatRef.current = onAddSelectionToChat
   const [diffRanges, setDiffRanges] = useState<{ startLine: number; endLine: number }[]>([])
+  const [workflowSyncLoading, setWorkflowSyncLoading] = useState(false)
+  const [workflowSyncError, setWorkflowSyncError] = useState<string | null>(null)
 
   // Fetch git diff for modified lines when opening a file (Tauri only)
   useEffect(() => {
@@ -508,6 +512,71 @@ export function BuilderDashboard({
     }
   }
 
+  const handleWorkflowCreateOrUpdate = async () => {
+    if (!activeFile || !isWorkflowFile) return
+    setWorkflowSyncError(null)
+    let workflow: Record<string, unknown>
+    try {
+      workflow = JSON.parse(activeFile.content) as Record<string, unknown>
+    } catch {
+      setWorkflowSyncError('Invalid workflow JSON')
+      return
+    }
+    const session = getLaunchpadSession()
+    if (!session?.url || !session?.token) {
+      setWorkflowSyncError('Launchpad session required. Log in via the launchpad.')
+      return
+    }
+    const tenant = session.tenant ?? ''
+    const data = workflow.data as { nodes?: unknown[]; edges?: unknown[] } | undefined
+    const nodes = Array.isArray(data?.nodes) ? data.nodes : []
+    const edges = Array.isArray(data?.edges) ? data.edges : []
+    const storedWorkflowId = typeof workflow.workflowId === 'string' ? workflow.workflowId : null
+
+    setWorkflowSyncLoading(true)
+    try {
+      if (storedWorkflowId) {
+        await launchpadWorkflowUpdate(session.url, { sessionToken: session.token, tenant }, storedWorkflowId, {
+          definition: { data: { nodes, edges } },
+          is_latest: true,
+        })
+        toast.success('Workflow updated')
+      } else {
+        const name = typeof workflow.name === 'string' ? workflow.name : 'workflow'
+        const triggerType = typeof workflow.triggerType === 'string' ? workflow.triggerType : 'httpTrigger'
+        const version = typeof workflow.version === 'number' ? workflow.version : 1
+        const description = typeof workflow.description === 'string' ? workflow.description : undefined
+        const created = await launchpadWorkflowCreate(session.url, { sessionToken: session.token, tenant }, {
+          triggerType,
+          name,
+          description,
+          version,
+          data: { nodes, edges },
+        })
+        const updatedWorkflow = { ...workflow, workflowId: created.id }
+        const newContent = JSON.stringify(updatedWorkflow, null, 2)
+        handleFileChange(newContent)
+        if (isTauri() && (activeFile.path.includes('/') || activeFile.path.includes('\\'))) {
+          try {
+            await appWriteTextFile(activeFile.path, newContent)
+            setOpenFiles((prev) =>
+              prev.map((f) => (f.path === activeFile.path ? { ...f, content: newContent, isModified: false } : f))
+            )
+            setActiveFile((prev) => (prev?.path === activeFile.path ? { ...prev, content: newContent, isModified: false } : prev))
+            onAppFilesChanged?.()
+          } catch {
+            // leave file modified so user can save
+          }
+        }
+        toast.success('Workflow created')
+      }
+    } catch (e) {
+      setWorkflowSyncError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setWorkflowSyncLoading(false)
+    }
+  }
+
   const handleSaveAs = async () => {
     if (!activeFile) return
     if (activeFile.path === SETTINGS_TAB_PATH) return
@@ -849,6 +918,15 @@ export function BuilderDashboard({
   const isJsonFile = activeFile?.path?.toLowerCase().endsWith('.json')
   const isWorkflowFile = activeFile?.path?.toLowerCase().endsWith('.workflow.json')
   const isLayoutJsonFile = isJsonFile && !isWorkflowFile
+  const hasWorkflowId = (() => {
+    if (!activeFile?.content || !isWorkflowFile) return false
+    try {
+      const w = JSON.parse(activeFile.content) as Record<string, unknown>
+      return typeof w?.workflowId === 'string'
+    } catch {
+      return false
+    }
+  })()
   const layoutSpecFromFile = activeFile && isLayoutJsonFile ? parseLayoutOrSpec(activeFile.content) : null
   // When agent just returned code for generated.json, use that spec so the UI tree renders even before file is focused
   const generatedSpecFromAgent =
@@ -976,6 +1054,23 @@ export function BuilderDashboard({
             <Layout className="w-4 h-4 mr-1" />
             Editor
             <span className="ml-1.5 opacity-60 text-xs font-normal">{editorShortcut}</span>
+          </Button>
+          <div className="ml-auto" />
+          {workflowSyncError && (
+            <span className="text-xs text-red-400 mr-2 max-w-[200px] truncate" title={workflowSyncError}>
+              {workflowSyncError}
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-sm text-gray-400 hover:text-gray-200 hover:bg-[#3e3e3e]"
+            onClick={handleWorkflowCreateOrUpdate}
+            disabled={workflowSyncLoading}
+            title={hasWorkflowId ? 'Update workflow via launchpad' : 'Create workflow via launchpad'}
+          >
+            <Save className="w-4 h-4 mr-1" />
+            {workflowSyncLoading ? 'Syncing…' : hasWorkflowId ? 'Update workflow' : 'Create workflow'}
           </Button>
         </div>
       )}
