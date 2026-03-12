@@ -8,6 +8,8 @@ export type HttpTriggerNodeData = {
   method?: string
   path?: string
   authentication?: 'none' | 'bearer'
+  /** Custom headers (key-value) to send with the trigger request. */
+  headers?: Record<string, string>
   /** Raw request body as JSON string (for POST, PUT, PATCH). */
   rawBody?: string
 }

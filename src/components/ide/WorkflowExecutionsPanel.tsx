@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { X, RefreshCw, ChevronDown, ChevronRight, GitBranch, ArrowDown } from 'lucide-react'
+import { X, RefreshCw, ChevronDown, ChevronRight, GitBranch, ArrowDown, Copy } from 'lucide-react'
 import { Button } from '../ui/button'
+import { toast } from 'sonner'
 import {
   launchpadWorkflowExecutions,
   type WorkflowExecution,
@@ -61,6 +62,44 @@ function computeExecutionLayers(definition: WorkflowDefinition): string[][] {
   return layers
 }
 
+function hasContent(v: unknown): boolean {
+  if (v === undefined || v === null) return false
+  if (typeof v === 'string') return v !== ''
+  if (typeof v === 'object' && !Array.isArray(v)) return Object.keys(v as object).length > 0
+  return true
+}
+
+function renderJsonOrString(value: unknown): string {
+  if (value === undefined || value === null) return '—'
+  if (typeof value === 'object') return JSON.stringify(value, null, 2)
+  return String(value)
+}
+
+/** Build a curl command from request method, url, headers, and body. */
+function buildCurlFromRequest(
+  method: string,
+  url: string,
+  headers: Record<string, string> | undefined,
+  body: unknown
+): string {
+  const m = (method || 'GET').toUpperCase()
+  const urlStr = url || 'https://example.com/endpoint'
+  const lines: string[] = [`curl -X ${m} '${urlStr}'`]
+  if (headers && Object.keys(headers).length > 0) {
+    for (const [k, v] of Object.entries(headers)) {
+      if (k.trim() === '') continue
+      const val = (v ?? '').replace(/'/g, "'\\''")
+      lines.push(`  -H '${k}: ${val}'`)
+    }
+  }
+  if (hasContent(body)) {
+    const raw = typeof body === 'object' ? JSON.stringify(body) : String(body)
+    const escaped = raw.replace(/'/g, "'\\''")
+    lines.push(`  -d '${escaped}'`)
+  }
+  return lines.join(' \\\n')
+}
+
 function NodeStepRow({
   order,
   nodeId,
@@ -75,9 +114,23 @@ function NodeStepRow({
   showOrder?: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen ?? false)
-  const hasRequest = node.headers != null && Object.keys(node.headers).length > 0
-  const hasResponse = node.status !== undefined || (node.body !== undefined && node.body !== '' && (typeof node.body !== 'object' || Object.keys(node.body as object).length > 0))
+  const requestHeaders = node.request?.headers ?? node.headers
+  const requestBody = node.request?.body
+  const requestMethod = (node.request as { method?: string } | undefined)?.method ?? (node as WorkflowExecutionNodeResult & { method?: string }).method ?? 'POST'
+  const requestUrl = (node.request as { url?: string } | undefined)?.url ?? (node as WorkflowExecutionNodeResult & { url?: string }).url ?? 'https://example.com/endpoint'
+  const responseStatus = node.response?.status ?? node.status
+  const responseBody = node.response?.body ?? node.body
+  const hasRequest = (requestHeaders != null && Object.keys(requestHeaders).length > 0) || hasContent(requestBody)
+  const hasResponse = responseStatus !== undefined || hasContent(responseBody)
   const hasDetails = hasRequest || hasResponse
+
+  const handleCopyCurl = useCallback(() => {
+    const curl = buildCurlFromRequest(requestMethod, requestUrl, requestHeaders ?? undefined, requestBody)
+    navigator.clipboard.writeText(curl).then(
+      () => toast.success('Curl copied to clipboard'),
+      () => toast.error('Failed to copy')
+    )
+  }, [requestMethod, requestUrl, requestHeaders, requestBody])
 
   return (
     <div className="border-l border-[#3e3e3e] pl-2 ml-2">
@@ -97,45 +150,68 @@ function NodeStepRow({
         )}
         {showOrder && <span className="text-gray-500 font-mono text-xs w-5">{order}.</span>}
         <span className="font-medium">{nodeId}</span>
-        {node.status != null && (
+        {responseStatus != null && (
           <span
             className={
-              node.status >= 200 && node.status < 300
+              (responseStatus as number) >= 200 && (responseStatus as number) < 300
                 ? 'text-emerald-400'
-                : node.status >= 400
+                : (responseStatus as number) >= 400
                   ? 'text-red-400'
                   : 'text-gray-500'
             }
           >
-            {node.status}
+            {responseStatus}
           </span>
         )}
       </button>
       {open && hasDetails && (
-        <div className="mt-1 mb-2 space-y-2 text-xs">
-          {hasRequest && (
-            <div>
+        <div className="mt-1 mb-2 space-y-3 text-xs">
+          <div>
+            <div className="mb-1 flex items-center justify-between gap-2">
               <span className="text-gray-500 font-medium">Request</span>
-              <pre className="mt-0.5 rounded bg-[#252526] p-2 overflow-x-auto text-gray-300">
-                {JSON.stringify(node.headers, null, 2)}
-              </pre>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-1.5 text-[10px] text-gray-400 hover:text-gray-200"
+                onClick={(e) => { e.stopPropagation(); handleCopyCurl() }}
+                title="Copy as curl"
+              >
+                <Copy className="h-3 w-3 mr-1" />
+                Copy curl
+              </Button>
             </div>
-          )}
-          {(node.status !== undefined || node.body !== undefined) && (
-            <div>
-              <span className="text-gray-500 font-medium">Response</span>
-              {node.status !== undefined && (
-                <p className="mt-0.5 text-gray-400">Status: {node.status}</p>
-              )}
-              {node.body !== undefined && node.body !== '' && (typeof node.body !== 'object' || Object.keys(node.body as object).length > 0) && (
-                <pre className="mt-0.5 rounded bg-[#252526] p-2 overflow-x-auto text-gray-300">
-                  {typeof node.body === 'object'
-                    ? JSON.stringify(node.body, null, 2)
-                    : String(node.body)}
+            <div className="mt-0.5 rounded bg-[#252526] p-2 min-h-[2rem]">
+              {requestHeaders != null && Object.keys(requestHeaders).length > 0 ? (
+                <pre className="overflow-x-auto text-gray-300 whitespace-pre-wrap break-words">
+                  {JSON.stringify(requestHeaders, null, 2)}
                 </pre>
+              ) : null}
+              {hasContent(requestBody) ? (
+                <pre className="mt-1 overflow-x-auto text-gray-300 whitespace-pre-wrap break-words border-t border-[#3e3e3e] pt-1">
+                  {renderJsonOrString(requestBody)}
+                </pre>
+              ) : null}
+              {(requestHeaders == null || Object.keys(requestHeaders).length === 0) && !hasContent(requestBody) && (
+                <span className="text-gray-500">—</span>
               )}
             </div>
-          )}
+          </div>
+          <div>
+            <span className="text-gray-500 font-medium">Response</span>
+            <div className="mt-0.5 rounded bg-[#252526] p-2 min-h-[2rem]">
+              {responseStatus !== undefined && (
+                <p className="text-gray-400">Status: {responseStatus}</p>
+              )}
+              {hasContent(responseBody) ? (
+                <pre className={`overflow-x-auto text-gray-300 whitespace-pre-wrap break-words ${responseStatus !== undefined ? 'mt-1' : ''}`}>
+                  {renderJsonOrString(responseBody)}
+                </pre>
+              ) : null}
+              {responseStatus === undefined && !hasContent(responseBody) && (
+                <span className="text-gray-500">—</span>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -259,7 +335,30 @@ function ExecutionRow({
           )}
           {context?.Webhook != null && (
             <div className="rounded bg-[#1e1e1e] p-2">
-              <span className="text-xs font-medium text-gray-500">Webhook (trigger)</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-gray-500">Webhook (trigger)</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1.5 text-[10px] text-gray-400 hover:text-gray-200"
+                  onClick={() => {
+                    const curl = buildCurlFromRequest(
+                      'POST',
+                      'https://example.com/webhook',
+                      context.Webhook?.headers,
+                      context.Webhook?.body
+                    )
+                    navigator.clipboard.writeText(curl).then(
+                      () => toast.success('Curl copied to clipboard'),
+                      () => toast.error('Failed to copy')
+                    )
+                  }}
+                  title="Copy as curl"
+                >
+                  <Copy className="h-3 w-3 mr-1" />
+                  Copy curl
+                </Button>
+              </div>
               {context.Webhook.headers != null && Object.keys(context.Webhook.headers).length > 0 && (
                 <pre className="mt-1 text-xs rounded bg-[#252526] p-2 overflow-x-auto text-gray-300">
                   {JSON.stringify(context.Webhook.headers, null, 2)}

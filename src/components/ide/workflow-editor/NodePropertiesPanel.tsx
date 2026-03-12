@@ -464,6 +464,91 @@ function NodeIdField({
   )
 }
 
+function KeyValueHeadersSection({
+  label,
+  record,
+  onChange,
+  focusRingClass,
+}: {
+  label: string
+  record: Record<string, string>
+  onChange: (next: Record<string, string>) => void
+  focusRingClass: string
+}) {
+  const entries = Object.entries(record)
+  const setHeader = (key: string, value: string) => {
+    const next = { ...record }
+    if (value === '') {
+      delete next[key]
+    } else {
+      next[key] = value
+    }
+    onChange(next)
+  }
+  const addHeader = () => onChange({ ...record, '': '' })
+  const removeHeader = (key: string) => {
+    const next = { ...record }
+    delete next[key]
+    onChange(next)
+  }
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between">
+        <label className="block text-xs font-medium uppercase tracking-wider text-gray-500">
+          {label}
+        </label>
+        <button
+          type="button"
+          onClick={addHeader}
+          className="rounded px-1.5 py-0.5 text-xs text-gray-400 hover:bg-[#3e3e3e] hover:text-gray-200"
+        >
+          + Add header
+        </button>
+      </div>
+      <div className="space-y-2">
+        {entries.length === 0 ? (
+          <p className="text-xs text-gray-500">No headers</p>
+        ) : (
+          entries.map(([k, v], i) => (
+            <div key={`header-${i}`} className="flex gap-2">
+              <input
+                type="text"
+                value={k}
+                onChange={(e) => {
+                  const newKey = e.target.value
+                  if (newKey !== k) {
+                    const next = { ...record }
+                    delete next[k]
+                    if (newKey) next[newKey] = v
+                    onChange(next)
+                  }
+                }}
+                placeholder="Name"
+                className={`flex-1 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-2 py-1.5 text-xs text-gray-200 placeholder:text-gray-500 outline-none focus:ring-1 ${focusRingClass}`}
+              />
+              <input
+                type="text"
+                value={v}
+                onChange={(e) => setHeader(k, e.target.value)}
+                placeholder="Value"
+                className={`flex-1 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-2 py-1.5 text-xs text-gray-200 placeholder:text-gray-500 outline-none focus:ring-1 ${focusRingClass}`}
+              />
+              <button
+                type="button"
+                onClick={() => removeHeader(k)}
+                className="shrink-0 rounded p-1.5 text-gray-400 hover:bg-[#3e3e3e] hover:text-white"
+                aria-label="Remove header"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
 function HttpTriggerFields({
   data,
   onChange,
@@ -519,6 +604,14 @@ function HttpTriggerFields({
           <option value="bearer">Bearer</option>
         </select>
       </div>
+      <KeyValueHeadersSection
+        label="Headers"
+        record={(data.headers && typeof data.headers === 'object' && !Array.isArray(data.headers))
+          ? (data.headers as Record<string, string>)
+          : {}}
+        onChange={(headers) => onChange({ headers })}
+        focusRingClass="focus:ring-emerald-500/30 focus:border-emerald-500/60"
+      />
       {showRawBody && (
         <div>
           <div className="mb-1.5 flex items-center justify-between">
@@ -887,6 +980,14 @@ function ServiceCallFields({
           <option value="bearer">Bearer</option>
         </select>
       </div>
+      <KeyValueHeadersSection
+        label="Headers"
+        record={(data.headers && typeof data.headers === 'object' && !Array.isArray(data.headers))
+          ? (data.headers as Record<string, string>)
+          : {}}
+        onChange={(headers) => onChange({ headers })}
+        focusRingClass="focus:ring-violet-500/30 focus:border-violet-500/60"
+      />
       {showRawBody && (
         <div>
           <div className="mb-1.5 flex items-center justify-between">

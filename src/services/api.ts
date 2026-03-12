@@ -505,11 +505,18 @@ export async function launchpadWorkflowExecute(
   })
 }
 
-/** Node result in context.nodes (request/response for one step). */
+/** Node result in context.nodes (request/response for one step). Supports flat (headers, body, status) or nested request/response. */
 export interface WorkflowExecutionNodeResult {
-  body?: unknown
+  /** Flat: request headers; or use request.headers if present. */
   headers?: Record<string, string>
+  /** Flat: response body; or use response.body if present. */
+  body?: unknown
+  /** Flat: response status; or use response.status if present. */
   status?: number
+  /** Optional nested request (headers, body). */
+  request?: { headers?: Record<string, string>; body?: unknown }
+  /** Optional nested response (status, body). */
+  response?: { status?: number; body?: unknown }
   [key: string]: unknown
 }
 

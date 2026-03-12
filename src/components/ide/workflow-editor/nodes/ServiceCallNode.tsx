@@ -12,6 +12,8 @@ export type ServiceCallNodeData = {
   method?: string
   path?: string
   authentication?: 'none' | 'bearer'
+  /** Custom headers (key-value) to send with the service call. */
+  headers?: Record<string, string>
   rawBody?: string
 }
 
