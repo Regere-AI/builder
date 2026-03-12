@@ -1262,29 +1262,33 @@ export function BuilderDashboard({
             </div>
           ) : null
         })() ?? (liveStreamingSpec != null && showLayoutPreview ? (
-          <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e] flex flex-col gap-4">
-            <p className="text-xs text-gray-500">Preview (streaming…)</p>
-            <div className="min-h-0 flex-1 rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-6 bg-[#1e1e1e] gap-4">
+            <p className="text-xs text-gray-500 shrink-0">Preview (streaming…)</p>
+            <div className="min-h-0 flex-1 overflow-auto rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
               <JSONUIProvider registry={registry} store={jsonRenderStateStore} handlers={jsonRenderActionHandlers}>
                 <Renderer key={previewSpecKey} spec={specForPreview as Spec} registry={registry} loading={true} />
               </JSONUIProvider>
             </div>
-            <StateDebugPane defaultCollapsed label="State" />
+            <div className="shrink-0">
+              <StateDebugPane defaultCollapsed label="State" />
+            </div>
           </div>
         ) : null) ?? (activeFile?.path === SETTINGS_TAB_PATH ? (
           <BuilderSettingsView user={user} />
         ) : activeFile ? (
           showLayoutPreview ? (
-            <div className="flex-1 overflow-auto p-6 bg-[#1e1e1e] flex flex-col gap-4">
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-6 bg-[#1e1e1e] gap-4">
               {liveStreamingSpec != null && (
-                <p className="text-xs text-gray-500">Preview (streaming…)</p>
+                <p className="text-xs text-gray-500 shrink-0">Preview (streaming…)</p>
               )}
-              <div className="min-h-0 flex-1 rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
+              <div className="min-h-0 flex-1 overflow-auto rounded-md border border-[#3e3e3e] bg-[#2d2d2d] p-4">
                 <JSONUIProvider registry={registry} store={jsonRenderStateStore} handlers={jsonRenderActionHandlers}>
                   <Renderer key={previewSpecKey} spec={specForPreview as Spec} registry={registry} loading={liveStreamingSpec != null} />
                 </JSONUIProvider>
               </div>
-              <StateDebugPane defaultCollapsed label="State" />
+              <div className="shrink-0">
+                <StateDebugPane defaultCollapsed label="State" />
+              </div>
             </div>
           ) : specForPreview === null && showPreview && isLayoutJsonFile ? (
             <div className="flex-1 flex items-center justify-center p-8 text-gray-400">
