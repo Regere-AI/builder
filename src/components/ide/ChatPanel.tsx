@@ -20,6 +20,7 @@ import {
 } from '@json-render/react'
 import type { Spec } from '@json-render/core'
 import { createSpecStreamCompiler, compileSpecStream } from '@json-render/core'
+import { parseMultiFileSpecStream } from '@/lib/json-render/streaming'
 import { parseToSpec, isJsonRenderSpec, ensureSpecHasRoot, attachOrphanElementsToRoot, injectDefaultActions, type JsonRenderSpec } from '@/lib/json-render/layout-to-spec'
 import { registry, jsonRenderActionHandlers } from '@/lib/json-render/registry'
 import { jsonRenderStateStore, seedStateFromSpec } from '@/lib/json-render/zustand-store'
@@ -540,7 +541,88 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
 
     if (!code) return
 
-    // Ensure written spec has a valid root so the preview never shows "Invalid layout JSON"
+    const looksAbsolute = (p: string) => /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('/')
+
+    // Multi-file: when the model outputs {"@file":"path"} then JSONL per file, write each to its path so contact.json stays contact.json
+    const segments = parseMultiFileSpecStream(text)
+    const useMultiFile =
+      segments.length > 1 || (segments.length === 1 && segments[0].path !== '')
+    if (useMultiFile) {
+      const filesToWrite: { relativePath: string; code: string }[] = []
+      for (const seg of segments) {
+        try {
+          const spec = compileSpecStream<Record<string, unknown>>(seg.jsonl)
+          if (!spec || !isJsonRenderSpec(spec)) continue
+          const parsed = spec as Record<string, unknown>
+          const normalized = ensureSpecHasRoot(parsed)
+          const finalSpec = (normalized ?? parsed) as Record<string, unknown>
+          const path = seg.path || generateNewLayoutPath(finalSpec)
+          filesToWrite.push({
+            relativePath: path,
+            code: JSON.stringify(finalSpec, null, 2),
+          })
+        } catch {
+          // skip invalid segment
+        }
+      }
+      if (filesToWrite.length > 0) {
+        sentCurrentSpecRef.current = null
+        streamingTargetFilePathForCurrentStreamRef.current = filesToWrite[0].relativePath
+        const lastFile = filesToWrite[filesToWrite.length - 1]
+        const notify = (resolvedPath?: string) => {
+          setUiGeneratedMessage(filesToWrite.length > 1 ? 'New UI files created' : 'New UI file created')
+          onAgentResponse?.({
+            type: 'code',
+            content: {
+              code: lastFile.code,
+              filePath: lastFile.relativePath,
+              ...(resolvedPath && { resolvedPath }),
+            },
+          })
+        }
+        if (isTauri()) {
+          const doWrite = async () => {
+            if (appRootPath) {
+              const dirPath = pathJoin(appRootPath, 'uiConfigs')
+              await appCreateDir(dirPath, true)
+              for (const { relativePath, code: fileCode } of filesToWrite) {
+                if (!looksAbsolute(relativePath)) {
+                  const fullPath = pathJoin(appRootPath, relativePath)
+                  await appWriteTextFile(fullPath, fileCode)
+                }
+              }
+              const lastFull = appRootPath && !looksAbsolute(lastFile.relativePath)
+                ? pathJoin(appRootPath, lastFile.relativePath)
+                : undefined
+              notify(lastFull)
+            } else {
+              for (const { relativePath, code: fileCode } of filesToWrite) {
+                const name = relativePath.split(/[/\\]/).pop() || 'generated.json'
+                await saveFile(fileCode, name)
+              }
+              notify()
+            }
+          }
+          void doWrite().catch((e) => {
+            console.error('Failed to write UI file(s):', e)
+            notify()
+          })
+        } else {
+          const lastCode = lastFile.code
+          const blob = new Blob([lastCode], { type: 'application/json' })
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = lastFile.relativePath.split(/[/\\]/).pop() || 'generated.json'
+          a.click()
+          URL.revokeObjectURL(url)
+          notify()
+        }
+        return
+      }
+    }
+
+    // Single-file: ensure root, then write to target path or derived path
     let parsed: Record<string, unknown> | null = null
     try {
       parsed = JSON.parse(code) as Record<string, unknown>
@@ -552,11 +634,9 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
     }
     sentCurrentSpecRef.current = null
 
-    // Resolve path: modify existing file (from context) or new file (name from layout title)
     const targetFilePath = streamingTargetFilePathForCurrentStreamRef.current
     const isNewFile = !targetFilePath
     const relativePath = targetFilePath ?? generateNewLayoutPath(parsed)
-    const looksAbsolute = (p: string) => /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('/')
     const fullPathForWrite =
       appRootPath && !looksAbsolute(relativePath)
         ? pathJoin(appRootPath, relativePath)
@@ -578,7 +658,6 @@ export function ChatPanel({ isOpen, onClose, width, onWidthChange, onAgentRespon
           await appWriteTextFile(fullPathForWrite, code!)
           notifyAndOpen(fullPathForWrite)
         } else if (!appRootPath || looksAbsolute(relativePath)) {
-          // No app folder open or path is absolute: use Save dialog or write to absolute path
           if (looksAbsolute(relativePath)) {
             await appWriteTextFile(relativePath, code!)
             notifyAndOpen(relativePath)

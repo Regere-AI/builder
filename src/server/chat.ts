@@ -151,6 +151,8 @@ async function handlePost(req: IncomingMessage, res: ServerResponse): Promise<vo
 
 Output ONLY SpecStream: one JSON object per line. Each line is a single RFC 6902 patch. No other text or markdown.
 
+When creating a new layout file (user asks for a new form or screen), start with exactly one line: {"@file":"uiConfigs/<name>.json"} where <name> matches the request (e.g. contact form -> contact.json, signup form -> sign-up.json, login -> login.json). Then output the JSONL patches for that file. This keeps file names stable (e.g. contact.json is not renamed when you later create another file).
+
 Ops: add, remove, replace (need "value"); move, copy (need "from" and "path"); test (need "value").
 Paths: /root, /elements/<id>, /elements/<id>/props, /elements/<id>/children, /state, /state/<path>.
 
