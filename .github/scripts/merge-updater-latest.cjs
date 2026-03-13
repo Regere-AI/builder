@@ -26,6 +26,7 @@ const defaultHeaders = {
 };
 
 function request(url, opts = {}) {
+  const allow404 = opts.allow404 === true;
   return new Promise((resolve, reject) => {
     const req = https.request(
       url,
@@ -38,8 +39,9 @@ function request(url, opts = {}) {
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => {
           const body = Buffer.concat(chunks).toString();
-          if (res.statusCode >= 400) reject(new Error(`${url} ${res.statusCode} ${body}`));
-          else resolve({ status: res.statusCode, body, json: () => JSON.parse(body) });
+          if (res.statusCode >= 400 && !(allow404 && res.statusCode === 404))
+            reject(new Error(`${url} ${res.statusCode} ${body}`));
+          else resolve({ status: res.statusCode, body, json: () => (body ? JSON.parse(body) : null) });
         });
       }
     );
@@ -72,9 +74,25 @@ function downloadAsset(assetId) {
   });
 }
 
+async function getRelease() {
+  const releaseRes = await request(`${BASE}/releases/tags/${tagName}`, { allow404: true });
+  if (releaseRes.status === 200) return releaseRes.json();
+  // 404: tag may not exist yet (e.g. draft) or tag format differs; list releases and use latest Builder-v* draft
+  const listRes = await request(`${BASE}/releases?per_page=20`);
+  const releases = listRes.json();
+  const match =
+    Array.isArray(releases) &&
+    releases.find((r) => r.tag_name && (r.tag_name === tagName || r.tag_name.startsWith('Builder-v')));
+  if (match) return match;
+  const byVersion = Array.isArray(releases) && releases.find((r) => r.tag_name && r.tag_name.includes(VERSION));
+  if (byVersion) return byVersion;
+  throw new Error(
+    `Release not found for tag ${tagName}. Tried by tag and listing releases; got ${Array.isArray(releases) ? releases.length : 0} release(s).`
+  );
+}
+
 async function main() {
-  const releaseRes = await request(`${BASE}/releases/tags/${tagName}`);
-  const release = releaseRes.json();
+  const release = await getRelease();
   const releaseId = release.id;
   const assets = release.assets || [];
 
