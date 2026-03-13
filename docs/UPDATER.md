@@ -113,7 +113,7 @@ After a successful build, Tauri will produce **updater artifacts** next to your 
 
    ```json
    {
-     "version": "1.0.1",
+     "version": "1.0.2",
      "notes": "Bug fixes and improvements",
      "pub_date": "2025-03-13T12:00:00Z",
      "platforms": {
