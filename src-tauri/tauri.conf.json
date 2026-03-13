@@ -36,7 +36,7 @@
       "providerShortName": null,
       "signingIdentity": null
     },
-    "resources": [],
+    "resources": { "../.env": ".env" },
     "externalBin": [],
     "copyright": "",
     "category": "DeveloperTool"
