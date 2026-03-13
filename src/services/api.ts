@@ -342,8 +342,17 @@ export async function launchpadLogin(
   return { sessionToken: res.sessionToken }
 }
 
-/** Launchpad health check (GET /launchpad/api/v1/health). Returns true if healthy. */
+/** Launchpad health check (GET /launchpad/api/v1/health). Returns true if healthy. Uses Rust backend when in Tauri. */
 export async function launchpadHealthCheck(baseUrl: string): Promise<boolean> {
+  if (isTauri()) {
+    try {
+      return await invoke<boolean>('launchpad_health_check', {
+        baseUrl: baseUrl.replace(/\/$/, ''),
+      })
+    } catch {
+      return false
+    }
+  }
   const url = baseUrl.replace(/\/$/, '') + '/launchpad/api/v1/health'
   const res = await fetch(url, { method: 'GET' })
   return res.ok
