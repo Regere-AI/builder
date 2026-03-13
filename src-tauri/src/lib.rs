@@ -550,6 +550,7 @@ pub fn run() {
             api::api_modify,
             api::api_goal,
             api::api_agent_health,
+            api::launchpad_health_check,
             api::launchpad_get_services,
             api::launchpad_register_service,
             api::launchpad_login,

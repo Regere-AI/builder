@@ -841,6 +841,21 @@ pub async fn api_agent_health() -> Result<serde_json::Value, String> {
     serde_json::from_str(&text).map_err(|e| format!("Invalid health response: {}", e))
 }
 
+// ---------- Launchpad: GET /launchpad/api/v1/health ----------
+
+#[tauri::command]
+pub async fn launchpad_health_check(base_url: String) -> Result<bool, String> {
+    let base = base_url.trim_end_matches('/');
+    let url = format!("{}/launchpad/api/v1/health", base);
+    let client = Client::new();
+    let res = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Health check request failed: {}", map_reqwest_error(e, "Request failed")))?;
+    Ok(res.status().is_success())
+}
+
 // ---------- Launchpad: GET /api/v1/services (service registry) ----------
 
 #[tauri::command]
