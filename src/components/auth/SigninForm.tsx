@@ -1,13 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { signin, sendOTP } from '@/services/api'
 import { Mail, Lock, Loader2 } from 'lucide-react'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { isTauri } from '@/desktop'
+import { isTauri, getEnv } from '@/desktop'
 
-const FORGOT_PASSWORD_URL = 'https://accounts.regere.ai/forgot-password'
+function forgotPasswordUrlFromBase(base: string | null): string | null {
+  if (!base || !base.trim()) return null
+  const normalized = base.trim().replace(/\/$/, '')
+  return `${normalized}/forgot-password`
+}
 
 interface SigninFormProps {
   onSigninSuccess: (email: string) => void
@@ -19,6 +23,12 @@ export function SigninForm({ onSigninSuccess, onError }: SigninFormProps) {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<{ workEmail?: string; password?: string }>({})
+  const [forgotPasswordLink, setForgotPasswordLink] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!isTauri()) return
+    getEnv('STACK_GUARD_API_BASE_URL').then((base) => setForgotPasswordLink(forgotPasswordUrlFromBase(base)))
+  }, [])
 
   const validate = (): boolean => {
     const newErrors: { workEmail?: string; password?: string } = {}
@@ -140,21 +150,23 @@ export function SigninForm({ onSigninSuccess, onError }: SigninFormProps) {
             {errors.password && (
               <p className="text-sm text-red-400">{errors.password}</p>
             )}
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={async () => {
-                  if (isTauri()) {
-                    await openUrl(FORGOT_PASSWORD_URL)
-                  } else {
-                    window.open(FORGOT_PASSWORD_URL, '_blank', 'noopener,noreferrer')
-                  }
-                }}
-                className="text-sm text-[#007acc] hover:text-[#005a9e] hover:underline focus:outline-none focus:underline"
-              >
-                Forgot password?
-              </button>
-            </div>
+            {forgotPasswordLink && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (isTauri()) {
+                      await openUrl(forgotPasswordLink)
+                    } else {
+                      window.open(forgotPasswordLink, '_blank', 'noopener,noreferrer')
+                    }
+                  }}
+                  className="text-sm text-[#007acc] hover:text-[#005a9e] hover:underline focus:outline-none focus:underline"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

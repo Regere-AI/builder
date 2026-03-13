@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react'
-import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search, Package, LayoutDashboard, GitBranch, FileText, Info, Cog, Globe, RefreshCw, Container, Copy, BookOpen } from 'lucide-react'
+import { Folder, ChevronRight, FilePlus, FolderPlus, FileJson, ChevronDown, FolderOpen, Search, Package, LayoutDashboard, GitBranch, FileText, Info, Cog, Globe, RefreshCw, BookOpen } from 'lucide-react'
 import { Tree } from 'react-arborist'
 import type { NodeRendererProps } from 'react-arborist'
 import type { TreeApi } from 'react-arborist'
@@ -17,7 +17,6 @@ import {
 import type { ActiveApp } from './IDELayout'
 import { GitPanel } from './GitPanel'
 import { getLaunchpadSession, launchpadGetServices, launchpadInstallPackage, launchpadRegisterService, launchpadUninstallPackage, type LaunchpadConfig, type LaunchpadService } from '@/services/api'
-import YAML from 'yaml'
 
 function pathJoin(...parts: string[]): string {
   return parts
@@ -41,75 +40,6 @@ function findNode(nodes: TreeNode[], path: string): TreeNode | null {
     }
   }
   return null
-}
-
-function buildDockerComposeYaml(services: LaunchpadService[]): string {
-  const serviceKey = (slug: string) => String(slug || 'service').replace(/\s+/g, '-').toLowerCase() || 'service'
-  const lines: string[] = [
-    'services:',
-    '',
-    '  launchpad:',
-    '    image: ghcr.io/regere-ai/launchpad_headless:latest',
-    '    ports:',
-    '      - "3000:3000"',
-    '    environment:',
-    '      DATABASE_URL: postgresql://<username>:<password>@postgres:5432/architect_sdk',
-    '      RUST_LOG: architect_sdk=debug,launchpad_headless=debug',
-    '      AUTH_API_URL: http://authrs:3000',
-    '      LICENSE_VALIDATE_ENDPOINT: https://accounts-api.regere.ai/api/licenses/validate',
-    '      LICENSE_API_KEY: <LICENSE_API_KEY>',
-    '      SETUP_PACKAGE_API_URL: https://accounts-api.regere.ai/api/setup-package',
-    '    networks:',
-    '      - new_app_network',
-    '      - new_db_network',
-    '',
-  ]
-  for (const svc of services) {
-    const slug = (svc.slug ?? svc.name ?? svc.id ?? 'service') as string
-    const key = serviceKey(slug)
-    const dockerImage = svc.dockerImage?.trim()
-    const tag = svc.tag?.trim()
-    const imageValue = dockerImage && tag ? `${dockerImage}:${tag}` : dockerImage || `<IMAGE_${key}>`
-    lines.push(`  ${key}:`)
-    lines.push(`    image: ${imageValue}`)
-    lines.push(`    ports:`)
-    lines.push(`      - "<PORT_${key}>:3000"`)
-    lines.push('    environment:')
-    lines.push('      DATABASE_URL: <DATABASE_URL>')
-    lines.push('      REDIS_URL: redis://redis-new:6379')
-    lines.push('      REDIS_ENABLED: "${REDIS_ENABLED:-true}"')
-    lines.push('      RUST_LOG: "authrs=debug"')
-    lines.push('      KV_STORE_ENCRYPTION_KEY: "${KV_STORE_ENCRYPTION_KEY:-}"')
-    lines.push('      SMTP_HOST: <SMTP_HOST>')
-    lines.push('      SMTP_PORT: <SMTP_PORT>')
-    lines.push('      SMTP_SECURE: <SMTP_SECURE>')
-    lines.push('      SMTP_USER: <SMTP_USER>')
-    lines.push('      SMTP_PASS: <SMTP_PASS>')
-    lines.push('      SMTP_FROM: <SMTP_FROM>')
-    lines.push('    restart: unless-stopped')
-    lines.push('    networks:')
-    lines.push('      - new_app_network')
-    lines.push('      - new_db_network')
-    lines.push('')
-  }
-  lines.push('networks:')
-  lines.push('  new_app_network:')
-  lines.push('    driver: bridge')
-  lines.push('    name: new_app_network')
-  lines.push('')
-  lines.push('  new_db_network:')
-  lines.push('    external: true')
-  lines.push('    name: new_db_network')
-  return lines.join('\n')
-}
-
-function validateYaml(yamlStr: string): { valid: boolean; error?: string } {
-  try {
-    YAML.parse(yamlStr)
-    return { valid: true }
-  } catch (e) {
-    return { valid: false, error: e instanceof Error ? e.message : String(e) }
-  }
 }
 
 type FileIconComponent = typeof FileJson
@@ -467,10 +397,6 @@ export function LeftSidebar({
   const [registerServiceTag, setRegisterServiceTag] = useState('')
   const [registerServiceError, setRegisterServiceError] = useState<string | null>(null)
   const [registerServiceLoading, setRegisterServiceLoading] = useState(false)
-  const [showDeploymentDialog, setShowDeploymentDialog] = useState(false)
-  const [deploymentYaml, setDeploymentYaml] = useState('')
-  const [deploymentYamlError, setDeploymentYamlError] = useState<string | null>(null)
-  const [deploymentYamlCopied, setDeploymentYamlCopied] = useState(false)
   const [showInstallPackageDialog, setShowInstallPackageDialog] = useState(false)
   const [installPackageService, setInstallPackageService] = useState<{ slug: string; name: string } | null>(null)
   const [installPackageFile, setInstallPackageFile] = useState<File | null>(null)
@@ -1108,19 +1034,6 @@ export function LeftSidebar({
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setDeploymentYamlError(null)
-                      setDeploymentYaml(buildDockerComposeYaml(services))
-                      setShowDeploymentDialog(true)
-                    }}
-                    className="shrink-0 p-1 rounded hover:bg-[#3e3e3e] text-gray-500 hover:text-gray-300"
-                    title="Deployment options"
-                  >
-                    <Container className="w-3.5 h-3.5" />
-                  </button>
                 </div>
                 {serviceRegistryPaneOpen && (
                   <div className="flex-1 min-h-0 overflow-y-auto sidebar-scrollbar px-2 pb-2">
@@ -1617,76 +1530,6 @@ export function LeftSidebar({
               >
                 Close
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Deployment options dialog (e.g. Docker Compose) */}
-      {showDeploymentDialog && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity"
-          onClick={() => setShowDeploymentDialog(false)}
-        >
-          <div
-            className="w-full max-w-3xl max-h-[90vh] mx-4 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-[#2d2d30] to-[#1e1e21] shadow-2xl shadow-black/40 ring-1 ring-white/5 flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 pt-6 pb-4 border-b border-white/5 shrink-0">
-              <h2 className="text-lg font-semibold tracking-tight text-white">Deployment options</h2>
-              <p className="mt-1 text-sm text-gray-400">Docker Compose — edit below and validate YAML.</p>
-            </div>
-            <div className="p-4 flex-1 min-h-0 flex flex-col gap-2">
-              {deploymentYamlError !== null && (
-                <div className={cn('text-xs px-3 py-2 rounded shrink-0', deploymentYamlError === '' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400')}>
-                  {deploymentYamlError === '' ? 'YAML is valid.' : deploymentYamlError}
-                </div>
-              )}
-              <textarea
-                value={deploymentYaml}
-                onChange={(e) => {
-                  setDeploymentYaml(e.target.value)
-                  setDeploymentYamlError(null)
-                }}
-                className="flex-1 min-h-[320px] w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-sm font-mono text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc] resize-y"
-                spellCheck={false}
-              />
-              <div className="flex gap-2 shrink-0 flex-wrap">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(deploymentYaml)
-                      setDeploymentYamlCopied(true)
-                      setTimeout(() => setDeploymentYamlCopied(false), 2000)
-                    } catch {
-                      setDeploymentYamlCopied(false)
-                    }
-                  }}
-                  className="rounded-md border border-[#3e3e3e] bg-[#2d2d2d] px-3 py-2 text-sm text-gray-200 hover:bg-[#3e3e3e] focus:outline-none focus:ring-1 focus:ring-[#007acc] inline-flex items-center gap-2"
-                  title="Copy YAML to clipboard"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  {deploymentYamlCopied ? 'Copied!' : 'Copy to clipboard'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const result = validateYaml(deploymentYaml)
-                    setDeploymentYamlError(result.valid ? '' : (result.error ?? 'Invalid YAML'))
-                  }}
-                  className="rounded-md border border-[#3e3e3e] bg-[#2d2d2d] px-3 py-2 text-sm text-gray-200 hover:bg-[#3e3e3e] focus:outline-none focus:ring-1 focus:ring-[#007acc]"
-                >
-                  Validate YAML
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowDeploymentDialog(false)}
-                  className="rounded-md bg-[#007acc] px-3 py-2 text-sm text-white hover:bg-[#005a9e] focus:outline-none focus:ring-1 focus:ring-[#007acc]"
-                >
-                  Close
-                </button>
-              </div>
             </div>
           </div>
         </div>

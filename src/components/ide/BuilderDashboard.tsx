@@ -891,7 +891,7 @@ export function BuilderDashboard({
         text: 'About',
         action: () => {
           // Could use @tauri-apps/plugin-dialog message() here
-          console.log('Builder 1.0.0')
+          console.log('Builder 1.0.1')
         },
       })
       const helpSubmenu = await Submenu.new({
