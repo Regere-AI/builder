@@ -8,7 +8,6 @@ use serde::Serialize;
 use std::fs;
 use tauri::Emitter;
 use tauri::Manager;
-use tauri::path::BaseDirectory;
 use tauri_plugin_dialog::DialogExt;
 
 #[derive(Debug, Serialize)]
@@ -373,45 +372,6 @@ async fn save_file(
     }
 }
 
-/// Candidate .env paths when running as a bundled app (no project root).
-/// Tries: next to executable, app Resources, and platform app-data dirs.
-fn bundled_app_env_paths() -> Vec<std::path::PathBuf> {
-    let mut paths = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            paths.push(exe_dir.join(".env"));
-            #[cfg(target_os = "macos")]
-            {
-                // Builder.app/Contents/MacOS/Builder -> Contents/Resources/.env
-                if let Some(contents) = exe_dir.parent() {
-                    paths.push(contents.join("Resources").join(".env"));
-                    // Folder containing the .app (e.g. /Applications)
-                    if let Some(app_parent) = contents.parent() {
-                        paths.push(app_parent.join(".env"));
-                    }
-                }
-            }
-            #[cfg(windows)]
-            {
-                if let Some(app_dir) = exe_dir.parent() {
-                    paths.push(app_dir.join(".env"));
-                }
-            }
-        }
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        #[cfg(target_os = "macos")]
-        paths.push(std::path::Path::new(&home).join("Library/Application Support/com.regere.builder/.env"));
-        #[cfg(target_os = "linux")]
-        paths.push(std::path::Path::new(&home).join(".config/Builder/.env"));
-    }
-    #[cfg(windows)]
-    if let Ok(local) = std::env::var("LOCALAPPDATA") {
-        paths.push(std::path::Path::new(&local).join("com.regere.builder/.env"));
-    }
-    paths
-}
-
 /// Fallback: .env keys with hyphens (e.g. REGERE-API-KEY, STACK_GUARD_API_BASE_URL) may not
 /// be loaded by dotenvy; read them manually from the file if missing.
 fn ensure_env_from_file(env_path: &std::path::Path) {
@@ -466,13 +426,6 @@ pub fn run() {
             ensure_env_from_file(&env_path);
         }
     }
-    // When running as a bundled app, load .env from executable-relative and app-data paths
-    for env_path in bundled_app_env_paths() {
-        if env_path.exists() {
-            let _ = dotenvy::from_path(&env_path);
-            ensure_env_from_file(&env_path);
-        }
-    }
 
     if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -481,15 +434,6 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(file_watcher::WatcherState(std::sync::Mutex::new(None)))
         .setup(|app| {
-            // Load .env from bundled resource if still missing (e.g. built with resources: { "../.env": ".env" })
-            if std::env::var("REGERE-API-KEY").is_err() {
-                if let Ok(env_path) = app.path().resolve(".env", BaseDirectory::Resource) {
-                    if env_path.exists() {
-                        let _ = dotenvy::from_path(&env_path);
-                        ensure_env_from_file(&env_path);
-                    }
-                }
-            }
             #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
             {
                 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
