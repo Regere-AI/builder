@@ -16,7 +16,7 @@ import {
 } from '@/desktop'
 import type { ActiveApp } from './IDELayout'
 import { GitPanel } from './GitPanel'
-import { getLaunchpadSession, launchpadGetServices, launchpadRegisterService, type LaunchpadConfig, type LaunchpadService } from '@/services/api'
+import { getLaunchpadSession, launchpadGetServices, launchpadInstallPackage, launchpadRegisterService, launchpadUninstallPackage, type LaunchpadConfig, type LaunchpadService } from '@/services/api'
 import YAML from 'yaml'
 
 function pathJoin(...parts: string[]): string {
@@ -471,6 +471,16 @@ export function LeftSidebar({
   const [deploymentYaml, setDeploymentYaml] = useState('')
   const [deploymentYamlError, setDeploymentYamlError] = useState<string | null>(null)
   const [deploymentYamlCopied, setDeploymentYamlCopied] = useState(false)
+  const [showInstallPackageDialog, setShowInstallPackageDialog] = useState(false)
+  const [installPackageService, setInstallPackageService] = useState<{ slug: string; name: string } | null>(null)
+  const [installPackageFile, setInstallPackageFile] = useState<File | null>(null)
+  const [installPackageError, setInstallPackageError] = useState<string | null>(null)
+  const [installPackageSuccess, setInstallPackageSuccess] = useState<string | null>(null)
+  const [installPackageLoading, setInstallPackageLoading] = useState(false)
+  const [installPackageFileInputKey, setInstallPackageFileInputKey] = useState(0)
+  const [uninstallingPackage, setUninstallingPackage] = useState<string | null>(null)
+  const [uninstallPackageName, setUninstallPackageName] = useState('')
+  const [uninstallPackageSuccess, setUninstallPackageSuccess] = useState<string | null>(null)
   const [tree, setTree] = useState<TreeNode[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1177,6 +1187,25 @@ export function LeftSidebar({
                                     <BookOpen className="w-3.5 h-3.5" />
                                   </button>
                                 )}
+                                {typeStr === 'framework' && svc.slug != null && selectedLaunchpad && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setInstallPackageService({
+                                        slug: String(svc.slug).trim(),
+                                        name: (svc.name ?? svc.slug ?? 'Service').toString(),
+                                      })
+                                      setInstallPackageFile(null)
+                                      setInstallPackageError(null)
+                                      setShowInstallPackageDialog(true)
+                                    }}
+                                    className="shrink-0 p-0.5 rounded text-gray-500 hover:text-gray-300 hover:bg-[#3e3e3e]"
+                                    title="Install package"
+                                  >
+                                    <Package className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
                               {hasInfo && isInfoOpen && (
                                 <div className="absolute left-0 right-0 z-10 mt-0.5 mx-1 p-2 rounded bg-[#1e1e1e] border border-[#3e3e3e] shadow-lg text-xs text-gray-300 space-y-1">
@@ -1424,6 +1453,171 @@ export function LeftSidebar({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Install package dialog (framework services) */}
+      {showInstallPackageDialog && installPackageService && selectedLaunchpad && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity"
+          onClick={() => !installPackageLoading && setShowInstallPackageDialog(false)}
+        >
+          <div
+            className="w-full max-w-md mx-4 max-h-[90vh] overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-[#2d2d30] to-[#1e1e21] shadow-2xl shadow-black/40 ring-1 ring-white/5 flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 pt-6 pb-4 border-b border-white/5 shrink-0">
+              <h2 className="text-lg font-semibold tracking-tight text-white">Packages</h2>
+              <p className="mt-1 text-sm text-gray-400">
+                Install or uninstall packages for <span className="text-gray-200">{installPackageService.name}</span> ({installPackageService.slug}).
+              </p>
+            </div>
+            <div className="p-6 flex-1 min-h-0 overflow-y-auto space-y-4">
+              {/* Uninstall by name */}
+              <div>
+                <h3 className="text-xs font-medium text-gray-400 mb-2">Uninstall package</h3>
+                {uninstallPackageSuccess && (
+                  <div className="mb-3 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-3 space-y-2">
+                    <p className="text-sm text-emerald-400">{uninstallPackageSuccess}</p>
+                    <p className="text-sm font-medium text-amber-200">
+                      The service <span className="text-amber-100 font-semibold">{installPackageService.name}</span> ({installPackageService.slug}) requires a restart for changes to take effect.
+                    </p>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={uninstallPackageName}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      const normalized = raw.toLowerCase().replace(/[\s-]+/g, '_')
+                      setUninstallPackageName(normalized)
+                      setInstallPackageError(null)
+                      setUninstallPackageSuccess(null)
+                    }}
+                    placeholder="Package name (e.g. sample_ecommerce)"
+                    className="flex-1 min-w-0 rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                  />
+                  <button
+                    type="button"
+                    disabled={!uninstallPackageName.trim() || uninstallingPackage !== null}
+                    onClick={async () => {
+                      const name = uninstallPackageName.trim().toLowerCase().replace(/[\s-]+/g, '_')
+                      if (!name) return
+                      const session = getLaunchpadSession()
+                      if (!session || session.launchpadId !== selectedLaunchpad.id) return
+                      setUninstallingPackage(name)
+                      setInstallPackageError(null)
+                      setUninstallPackageSuccess(null)
+                      try {
+                        await launchpadUninstallPackage(
+                          selectedLaunchpad.url,
+                          { sessionToken: session.token, tenant: selectedLaunchpad.tenant ?? '' },
+                          installPackageService.slug,
+                          name
+                        )
+                        setUninstallPackageName('')
+                        setUninstallPackageSuccess(`Package "${name}" uninstalled successfully.`)
+                      } catch (err) {
+                        setInstallPackageError(err instanceof Error ? err.message : 'Uninstall failed')
+                      } finally {
+                        setUninstallingPackage(null)
+                      }
+                    }}
+                    className="shrink-0 rounded-md border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-400 hover:bg-red-500/20 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-red-500"
+                  >
+                    {uninstallingPackage !== null ? 'Uninstalling…' : 'Uninstall'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Upload new package */}
+              <form
+                className="space-y-4"
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  if (!installPackageFile) {
+                    setInstallPackageError('Please select a file')
+                    return
+                  }
+                  const session = getLaunchpadSession()
+                  if (!session || session.launchpadId !== selectedLaunchpad.id) {
+                    setInstallPackageError('Not logged in to this launchpad')
+                    return
+                  }
+                  setInstallPackageError(null)
+                  setInstallPackageSuccess(null)
+                  setInstallPackageLoading(true)
+                  try {
+                    await launchpadInstallPackage(
+                      selectedLaunchpad.url,
+                      { sessionToken: session.token, tenant: selectedLaunchpad.tenant ?? '' },
+                      installPackageService.slug,
+                      installPackageFile
+                    )
+                    setInstallPackageFile(null)
+                    setInstallPackageFileInputKey((k) => k + 1)
+                    setInstallPackageSuccess('Package installed successfully.')
+                  } catch (err) {
+                    setInstallPackageError(err instanceof Error ? err.message : 'Install failed')
+                  } finally {
+                    setInstallPackageLoading(false)
+                  }
+                }}
+              >
+                {installPackageError && (
+                  <p className="text-xs text-red-400">{installPackageError}</p>
+                )}
+                {installPackageSuccess && (
+                  <p className="text-xs text-emerald-400">{installPackageSuccess}</p>
+                )}
+                <div>
+                  <label className="block text-xs font-medium text-gray-400 mb-1">Install new package</label>
+                  <input
+                    key={installPackageFileInputKey}
+                    type="file"
+                    accept="*"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      setInstallPackageFile(f ?? null)
+                      setInstallPackageError(null)
+                      setInstallPackageSuccess(null)
+                    }}
+                    className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-sm text-gray-200 file:mr-2 file:rounded file:border-0 file:bg-[#007acc] file:px-3 file:py-1 file:text-sm file:text-white focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                  />
+                  {installPackageFile && (
+                    <p className="mt-1 text-xs text-gray-500">{installPackageFile.name}</p>
+                  )}
+                </div>
+                <button
+                  type="submit"
+                  disabled={installPackageLoading || !installPackageFile}
+                  className="w-full rounded-md bg-[#007acc] px-3 py-2 text-sm text-white hover:bg-[#005a9e] disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+                >
+                  {installPackageLoading ? 'Installing…' : 'Install'}
+                </button>
+              </form>
+            </div>
+            <div className="px-6 pb-6 pt-2 border-t border-white/5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!installPackageLoading && uninstallingPackage === null) {
+                    setShowInstallPackageDialog(false)
+                    setInstallPackageService(null)
+                    setInstallPackageFile(null)
+                    setUninstallPackageName('')
+                    setUninstallPackageSuccess(null)
+                    setInstallPackageError(null)
+                    setInstallPackageSuccess(null)
+                  }
+                }}
+                className="w-full rounded-md border border-[#3e3e3e] bg-[#2d2d2d] px-3 py-2 text-sm text-gray-200 hover:bg-[#3e3e3e] focus:outline-none focus:ring-1 focus:ring-[#007acc]"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

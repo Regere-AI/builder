@@ -443,6 +443,59 @@ export async function launchpadGetServiceSpec(
   })
 }
 
+/** Install package for a framework service (POST /proxy/{slug}/api/v1/config/package). Multipart form with file. */
+export async function launchpadInstallPackage(
+  baseUrl: string,
+  options: { sessionToken: string; tenant: string },
+  slug: string,
+  file: File
+): Promise<void> {
+  const base = baseUrl.replace(/\/$/, '')
+  const s = slug.trim()
+  if (!s) throw new Error('Service slug is required')
+  const url = `${base}/proxy/${encodeURIComponent(s)}/api/v1/config/package`
+  const formData = new FormData()
+  formData.append('file', file)
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${options.sessionToken}`,
+  }
+  if (options.tenant) headers['X-Tenant-ID'] = options.tenant
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: formData,
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    const message = text.length > 300 ? `${text.slice(0, 300)}…` : text
+    throw new Error(`Install package failed (${res.status}): ${message}`)
+  }
+}
+
+/** Uninstall package for a framework service (DELETE /proxy/{slug}/api/v1/config/package/{packageName}). */
+export async function launchpadUninstallPackage(
+  baseUrl: string,
+  options: { sessionToken: string; tenant: string },
+  slug: string,
+  packageName: string
+): Promise<void> {
+  const base = baseUrl.replace(/\/$/, '')
+  const s = slug.trim()
+  if (!s) throw new Error('Service slug is required')
+  const encoded = encodeURIComponent(packageName.trim())
+  const url = `${base}/proxy/${encodeURIComponent(s)}/api/v1/config/package/${encoded}`
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${options.sessionToken}`,
+  }
+  if (options.tenant) headers['X-Tenant-ID'] = options.tenant
+  const res = await fetch(url, { method: 'DELETE', headers })
+  if (!res.ok) {
+    const text = await res.text()
+    const message = text.length > 300 ? `${text.slice(0, 300)}…` : text
+    throw new Error(`Uninstall package failed (${res.status}): ${message}`)
+  }
+}
+
 /** Create workflow via launchpad proxy (POST /proxy/workflow/workflows). Calls Rust backend. Do not send id; backend assigns it. Returns the created workflow id. */
 export async function launchpadWorkflowCreate(
   baseUrl: string,
