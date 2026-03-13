@@ -41,7 +41,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "lts/*"
+          node-version: "24"
           cache: "npm"
 
       - name: Setup Rust
@@ -55,7 +55,10 @@ jobs:
           workspaces: src-tauri
 
       - name: Install frontend dependencies
-        run: npm ci
+        # Use npm install so optional deps (e.g. tree-sitter from swagger-ui-react) resolve
+        # when lock file was generated with a different npm version; npm ci can fail with
+        # "Missing: tree-sitter@... from lock file" in that case.
+        run: npm install
 
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
