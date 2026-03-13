@@ -57,7 +57,8 @@ function parseLayoutOrSpec(content: string): ReturnType<typeof parseToSpec> {
 }
 import { Menu, Submenu, MenuItem, PredefinedMenuItem, CheckMenuItem } from '@tauri-apps/api/menu'
 import { listen } from '@tauri-apps/api/event'
-import { exit } from '@tauri-apps/plugin-process'
+import { exit, relaunch } from '@tauri-apps/plugin-process'
+import { check } from '@tauri-apps/plugin-updater'
 
 export interface BuilderDashboardProps {
   user: {
@@ -862,6 +863,29 @@ export function BuilderDashboard({
         items: [minimizeItem, closeItem],
       })
 
+      const checkUpdatesItem = await MenuItem.new({
+        id: 'check-updates',
+        text: 'Check for Updates',
+        action: async () => {
+          try {
+            const update = await check()
+            if (!update) {
+              toast.info('You’re on the latest version.')
+              return
+            }
+            toast.info(`Update ${update.version} available. Downloading…`)
+            await update.downloadAndInstall((event) => {
+              if (event.event === 'Finished') {
+                toast.success('Update installed. Restarting…')
+              }
+            })
+            await relaunch()
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Update check failed'
+            toast.error(msg)
+          }
+        },
+      })
       const aboutItem = await MenuItem.new({
         id: 'about',
         text: 'About',
@@ -872,7 +896,7 @@ export function BuilderDashboard({
       })
       const helpSubmenu = await Submenu.new({
         text: 'Help',
-        items: [aboutItem],
+        items: [checkUpdatesItem, aboutItem],
       })
 
       const items = isMac

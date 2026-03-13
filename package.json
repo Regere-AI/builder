@@ -59,6 +59,7 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2.5.3",
     "@tauri-apps/plugin-process": "^2",
+    "@tauri-apps/plugin-updater": "^2",
     "@visual-json/core": "0.2.0",
     "@visual-json/react": "^0.2.0",
     "@xyflow/react": "^12.10.1",

@@ -21,6 +21,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "icon": ["icons/icon.ico", "icons/icon.icns"],
     "windows": {
       "certificateThumbprint": null,
@@ -41,5 +42,12 @@
     "copyright": "",
     "category": "DeveloperTool"
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI0ODI4MEU4QTRCNUVGMTEKUldRUjc3V2s2SUNDdEd5RXpNN0RVanRid0g2OGlEVGpFUUF2eTREdUgyaXZNZllhUUErcHlHbUwK",
+      "endpoints": [
+        "https://github.com/Regere-AI/builder-releases/releases/latest/download/latest.json"
+      ]
+    }
+  }
 }

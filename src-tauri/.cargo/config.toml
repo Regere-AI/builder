@@ -1,0 +1,4 @@
+# Use a single job to avoid "Cannot allocate memory (os error 12)" on memory-constrained systems.
+# Remove or increase this if you have enough RAM for parallel builds.
+[build]
+jobs = 4

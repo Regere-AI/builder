@@ -436,6 +436,10 @@ pub fn run() {
         .setup(|app| {
             #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
             {
+                app.handle().plugin(tauri_plugin_updater::Builder::new().build());
+            }
+            #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+            {
                 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
                 let handle = app.handle().clone();
                 // On Windows/Linux use Ctrl; on macOS use Cmd (META). Avoid registering both
