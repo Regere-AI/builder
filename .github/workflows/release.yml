@@ -63,3 +63,25 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # Merge latest.json so it includes all platforms (darwin + windows).
+  # Without this, whichever matrix job finishes last overwrites latest.json with only its platform,
+  # so e.g. macOS "Check for Updates" fails when the release only has windows-x86_64 in latest.json.
+  merge-latest-json:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    needs: publish-tauri
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Merge latest.json for all platforms
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          TAG="Builder-v$VERSION"
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          node .github/scripts/merge-updater-latest.js "$OWNER" "$REPO" "$TAG" "$GITHUB_TOKEN"
