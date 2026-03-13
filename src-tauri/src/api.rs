@@ -95,9 +95,9 @@ pub struct VerifyOTPRequest {
 pub struct VerifyUser {
     pub id: String,
     pub email: String,
-    #[serde(rename = "firstName")]
+    #[serde(rename = "firstName", alias = "first_name")]
     pub first_name: String,
-    #[serde(rename = "lastName")]
+    #[serde(rename = "lastName", alias = "last_name")]
     pub last_name: String,
 }
 
@@ -412,14 +412,31 @@ pub async fn api_verify_otp(data: VerifyOTPRequest) -> Result<VerifyOTPResponse,
         .await
         .map_err(|e| map_reqwest_error(e, "OTP verification failed"))?;
     let status = res.status();
+    let text = res
+        .text()
+        .await
+        .map_err(|e| map_reqwest_error(e, "OTP verification failed"))?;
     if !status.is_success() {
-        let text = res.text().await.unwrap_or_default();
         eprintln!("[api_verify_otp] {} response body: {}", status, text);
         return Err(extract_error_message(&text, "OTP verification failed"));
     }
-    res.json()
-        .await
-        .map_err(|e| map_reqwest_error(e, "OTP verification failed"))
+    // Prefer { success, data: { token, user } }; fallback to flat { token, user }
+    match serde_json::from_str::<VerifyOTPResponse>(&text) {
+        Ok(out) => return Ok(out),
+        Err(_) => {}
+    }
+    if let Ok(flat) = serde_json::from_str::<VerifyOTPData>(&text) {
+        return Ok(VerifyOTPResponse {
+            success: true,
+            data: flat,
+        });
+    }
+    let msg = format!(
+        "OTP verification failed: could not parse response. Body: {}",
+        text.chars().take(300).collect::<String>()
+    );
+    eprintln!("[api_verify_otp] {}", msg);
+    Err(msg)
 }
 
 /// Redact a secret for logging (show first 4 chars + "***").
