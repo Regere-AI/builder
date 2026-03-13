@@ -16,7 +16,8 @@ interface AddNodeToolbarProps {
 }
 
 function generateNodeId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`.toLowerCase()
+  const safePrefix = prefix.replace(/-/g, '_')
+  return `${safePrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`.toLowerCase()
 }
 
 export function AddNodeToolbar({ setNodes }: AddNodeToolbarProps) {
@@ -39,7 +40,7 @@ export function AddNodeToolbar({ setNodes }: AddNodeToolbarProps) {
       setNodes((prev) => [...prev, newNode])
     } else if (typeId === HTTP_REQUEST_NODE_TYPE) {
       const newNode: Node = {
-        id: generateNodeId('http-request'),
+        id: generateNodeId('http_request'),
         position,
         type: HTTP_REQUEST_NODE_TYPE,
         data: defaultHttpRequestNodeData,

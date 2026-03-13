@@ -412,12 +412,12 @@ function NodeIdField({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setIdInput(nodeId.toLowerCase())
+    setIdInput(nodeId.toLowerCase().replace(/-/g, '_'))
     setError(null)
   }, [nodeId])
 
   const handleBlur = () => {
-    const trimmed = idInput.trim().toLowerCase()
+    const trimmed = idInput.trim().toLowerCase().replace(/-/g, '_')
     if (!trimmed) {
       setError('ID is required')
       setIdInput(nodeId)
@@ -449,14 +449,14 @@ function NodeIdField({
         type="text"
         value={idInput}
         onChange={(e) => {
-          setIdInput(e.target.value.toLowerCase())
+          setIdInput(e.target.value.toLowerCase().replace(/-/g, '_'))
           setError(null)
         }}
         onBlur={handleBlur}
         onKeyDown={(e) => {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
         }}
-        placeholder="e.g. trigger-1"
+        placeholder="e.g. trigger_1"
         className="w-full rounded-md border border-[#3e3e3e] bg-[#1e1e1e] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-500 outline-none focus:border-[#555] focus:ring-1 focus:ring-[#555]"
       />
       {error && <p className="mt-1 text-xs text-amber-400">{error}</p>}

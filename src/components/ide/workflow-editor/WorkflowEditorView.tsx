@@ -25,12 +25,12 @@ export interface WorkflowEditorViewProps {
 
 const DEFAULT_NODES: Node[] = [
   {
-    id: 'trigger-1',
+    id: 'trigger_1',
     position: { x: 80, y: 100 },
     ...defaultHttpTriggerNode,
   } as Node,
   {
-    id: 'service-1',
+    id: 'service_1',
     position: { x: 380, y: 100 },
     type: SERVICE_CALL_NODE_TYPE,
     data: { serviceName: 'My Service', operation: 'run' },
@@ -38,15 +38,26 @@ const DEFAULT_NODES: Node[] = [
 ]
 
 const DEFAULT_EDGES: Edge[] = [
-  { id: 'trigger-1-service-1', source: 'trigger-1', target: 'service-1', type: 'step' },
+  { id: 'trigger_1_service_1', source: 'trigger_1', target: 'service_1', type: 'step' },
 ]
+
+function normalizeNodeId(id: string): string {
+  return id.replace(/-/g, '_')
+}
 
 function parseWorkflowData(json: string): { workflow: Record<string, unknown>; nodes: Node[]; edges: Edge[] } {
   try {
     const workflow = JSON.parse(json) as Record<string, unknown>
     const data = (workflow.data as Record<string, unknown> | undefined) ?? {}
-    const nodes = Array.isArray(data.nodes) && data.nodes.length > 0 ? (data.nodes as Node[]) : DEFAULT_NODES
-    const edges = Array.isArray(data.edges) ? (data.edges as Edge[]) : DEFAULT_EDGES
+    let nodes = Array.isArray(data.nodes) && data.nodes.length > 0 ? (data.nodes as Node[]) : DEFAULT_NODES
+    let edges = Array.isArray(data.edges) ? (data.edges as Edge[]) : DEFAULT_EDGES
+    nodes = nodes.map((n) => ({ ...n, id: normalizeNodeId(n.id) }))
+    edges = edges.map((e) => ({
+      ...e,
+      id: normalizeNodeId(e.id),
+      source: normalizeNodeId(e.source),
+      target: normalizeNodeId(e.target),
+    }))
     return { workflow, nodes, edges }
   } catch {
     return { workflow: {}, nodes: DEFAULT_NODES, edges: DEFAULT_EDGES }
@@ -103,7 +114,7 @@ export function WorkflowEditorView({ json, onChange }: WorkflowEditorViewProps) 
   }
 
   const handleUpdateNodeId = (oldId: string, newId: string) => {
-    const trimmed = newId.trim().toLowerCase()
+    const trimmed = newId.trim().toLowerCase().replace(/-/g, '_')
     if (!trimmed || trimmed === oldId) return
     if (nodes.some((n) => n.id.toLowerCase() === trimmed)) return
     setNodes((prev) =>

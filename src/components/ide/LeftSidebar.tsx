@@ -745,7 +745,7 @@ export function LeftSidebar({
       createWorkflowTriggerType === 'httpTrigger'
         ? [
             {
-              id: 'trigger-1',
+              id: 'trigger_1',
               position: { x: 80, y: 100 },
               type: 'httpTrigger',
               data: {
