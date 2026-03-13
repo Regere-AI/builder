@@ -4,14 +4,14 @@
  * and uploads it. Fixes the case where parallel matrix jobs overwrite latest.json with
  * only one platform (so e.g. macOS update check fails when Windows job wrote last).
  *
- * Usage: node merge-updater-latest.js <repo-owner> <repo-name> <tag-name> <github-token>
+ * Usage: node merge-updater-latest.cjs <repo-owner> <repo-name> <tag-name> <github-token>
  */
 
 const https = require('https');
 
 const [owner, repo, tagName, token] = process.argv.slice(2);
 if (!owner || !repo || !tagName || !token) {
-  console.error('Usage: merge-updater-latest.js <owner> <repo> <tag> <token>');
+  console.error('Usage: merge-updater-latest.cjs <owner> <repo> <tag> <token>');
   process.exit(1);
 }
 

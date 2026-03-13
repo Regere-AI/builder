@@ -84,4 +84,4 @@ jobs:
           TAG="Builder-v$VERSION"
           OWNER="${GITHUB_REPOSITORY%/*}"
           REPO="${GITHUB_REPOSITORY#*/}"
-          node .github/scripts/merge-updater-latest.js "$OWNER" "$REPO" "$TAG" "$GITHUB_TOKEN"
+          node .github/scripts/merge-updater-latest.cjs "$OWNER" "$REPO" "$TAG" "$GITHUB_TOKEN"
