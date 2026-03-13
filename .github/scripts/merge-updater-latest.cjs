@@ -22,6 +22,7 @@ const defaultHeaders = {
   Authorization: `Bearer ${token}`,
   Accept: 'application/vnd.github+json',
   'X-GitHub-Api-Version': '2022-11-28',
+  'User-Agent': 'Regere-Builder-Release-Merge/1.0',
 };
 
 function request(url, opts = {}) {
