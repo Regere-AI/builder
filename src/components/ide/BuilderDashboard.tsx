@@ -881,7 +881,13 @@ export function BuilderDashboard({
             })
             await relaunch()
           } catch (e) {
-            const msg = e instanceof Error ? e.message : 'Update check failed'
+            console.error('Update check failed:', e)
+            const msg =
+              e instanceof Error
+                ? e.message
+                : typeof e === 'string'
+                  ? e
+                  : 'Update check failed. Check that the release endpoint is reachable and latest.json exists.'
             toast.error(msg)
           }
         },
